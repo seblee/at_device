@@ -1,5 +1,5 @@
 /*
- * File      : at_socket_esp8266.c
+ * File      : at_socket_sim7600.c
  * This file is part of RT-Thread RTOS
  * COPYRIGHT (C) 2006 - 2018, RT-Thread Development Team
  *
@@ -35,26 +35,26 @@
 #error "This AT Client version is older, please check and update latest AT Client!"
 #endif
 
-#define LOG_TAG "at.esp8266"
+#define LOG_TAG "at.sim7600"
 #include <at_log.h>
 
-#ifdef AT_DEVICE_ESP8266
+#ifdef AT_DEVICE_SIM7600
 
-#define ESP8266_MODULE_SEND_MAX_SIZE 2048
-#define ESP8266_WAIT_CONNECT_TIME 5000
-#define ESP8266_THREAD_STACK_SIZE 1024
-#define ESP8266_THREAD_PRIORITY (RT_THREAD_PRIORITY_MAX / 2)
+#define SIM7600_MODULE_SEND_MAX_SIZE 2048
+#define SIM7600_WAIT_CONNECT_TIME 5000
+#define SIM7600_THREAD_STACK_SIZE 1024
+#define SIM7600_THREAD_PRIORITY (RT_THREAD_PRIORITY_MAX / 2)
 
 /* set real event by current socket and current state */
 #define SET_EVENT(socket, event) (((socket + 1) << 16) | (event))
 
 /* AT socket event type */
-#define ESP8266_EVENT_CONN_OK (1L << 0)
-#define ESP8266_EVENT_SEND_OK (1L << 1)
-#define ESP8266_EVENT_RECV_OK (1L << 2)
-#define ESP8266_EVNET_CLOSE_OK (1L << 3)
-#define ESP8266_EVENT_CONN_FAIL (1L << 4)
-#define ESP8266_EVENT_SEND_FAIL (1L << 5)
+#define SIM7600_EVENT_CONN_OK (1L << 0)
+#define SIM7600_EVENT_SEND_OK (1L << 1)
+#define SIM7600_EVENT_RECV_OK (1L << 2)
+#define SIM7600_EVNET_CLOSE_OK (1L << 3)
+#define SIM7600_EVENT_CONN_FAIL (1L << 4)
+#define SIM7600_EVENT_SEND_FAIL (1L << 5)
 
 static int cur_socket;
 static int cur_send_bfsz;
@@ -94,7 +94,7 @@ static int at_socket_event_recv(uint32_t event, uint32_t timeout, rt_uint8_t opt
  *         -2: wait socket event timeout
  *         -5: no memory
  */
-static int esp8266_socket_close(int socket)
+static int sim7600_socket_close(int socket)
 {
     at_response_t resp = RT_NULL;
     int result = RT_EOK;
@@ -139,7 +139,7 @@ __exit:
  *          -2: wait socket event timeout
  *          -5: no memory
  */
-static int esp8266_socket_connect(int socket, char *ip, int32_t port, enum at_socket_type type, rt_bool_t is_client)
+static int sim7600_socket_connect(int socket, char *ip, int32_t port, enum at_socket_type type, rt_bool_t is_client)
 {
     at_response_t resp = RT_NULL;
     int result = RT_EOK;
@@ -187,7 +187,7 @@ __retry:
     if (result != RT_EOK && !retryed)
     {
         LOG_D("socket (%d) connect failed, maybe the socket was not be closed at the last time and now will retry.", socket);
-        if (esp8266_socket_close(socket) < 0)
+        if (sim7600_socket_close(socket) < 0)
         {
             goto __exit;
         }
@@ -220,7 +220,7 @@ __exit:
  *          -2: waited socket event timeout
  *          -5: no memory
  */
-static int esp8266_socket_send(int socket, const char *buff, size_t bfsz, enum at_socket_type type)
+static int sim7600_socket_send(int socket, const char *buff, size_t bfsz, enum at_socket_type type)
 {
     int result = RT_EOK;
     int event_result = 0;
@@ -246,13 +246,13 @@ static int esp8266_socket_send(int socket, const char *buff, size_t bfsz, enum a
 
     while (sent_size < bfsz)
     {
-        if (bfsz - sent_size < ESP8266_MODULE_SEND_MAX_SIZE)
+        if (bfsz - sent_size < SIM7600_MODULE_SEND_MAX_SIZE)
         {
             cur_pkt_size = bfsz - sent_size;
         }
         else
         {
-            cur_pkt_size = ESP8266_MODULE_SEND_MAX_SIZE;
+            cur_pkt_size = SIM7600_MODULE_SEND_MAX_SIZE;
         }
 
         /* send the "AT+CIPSEND" commands to AT server than receive the '>' response on the first line. */
@@ -278,7 +278,7 @@ static int esp8266_socket_send(int socket, const char *buff, size_t bfsz, enum a
             goto __exit;
         }
         /* waiting OK or failed result */
-        if ((event_result = at_socket_event_recv(ESP8266_EVENT_SEND_OK | ESP8266_EVENT_SEND_FAIL, rt_tick_from_millisecond(5 * 1000),
+        if ((event_result = at_socket_event_recv(SIM7600_EVENT_SEND_OK | SIM7600_EVENT_SEND_FAIL, rt_tick_from_millisecond(5 * 1000),
                                                  RT_EVENT_FLAG_OR)) < 0)
         {
             LOG_E("socket (%d) send failed, wait connect OK|FAIL timeout.", socket);
@@ -286,7 +286,7 @@ static int esp8266_socket_send(int socket, const char *buff, size_t bfsz, enum a
             goto __exit;
         }
         /* check result */
-        if (event_result & ESP8266_EVENT_SEND_FAIL)
+        if (event_result & SIM7600_EVENT_SEND_FAIL)
         {
             LOG_E("socket (%d) send failed, return failed.", socket);
             result = -RT_ERROR;
@@ -325,7 +325,7 @@ __exit:
  *         -2: wait socket event timeout
  *         -5: no memory
  */
-static int esp8266_domain_resolve(const char *name, char ip[16])
+static int sim7600_domain_resolve(const char *name, char ip[16])
 {
 #define RESOLVE_RETRY 5
 
@@ -392,7 +392,7 @@ __exit:
  * @param event notice event
  * @param cb notice callback
  */
-static void esp8266_socket_set_event_cb(at_socket_evt_t event, at_evt_cb_t cb)
+static void sim7600_socket_set_event_cb(at_socket_evt_t event, at_evt_cb_t cb)
 {
     if (event < sizeof(at_evt_cb_set) / sizeof(at_evt_cb_set[1]))
     {
@@ -406,11 +406,11 @@ static void urc_send_func(const char *data, rt_size_t size)
 
     if (strstr(data, "SEND OK"))
     {
-        at_socket_event_send(SET_EVENT(cur_socket, ESP8266_EVENT_SEND_OK));
+        at_socket_event_send(SET_EVENT(cur_socket, SIM7600_EVENT_SEND_OK));
     }
     else if (strstr(data, "SEND FAIL"))
     {
-        at_socket_event_send(SET_EVENT(cur_socket, ESP8266_EVENT_SEND_FAIL));
+        at_socket_event_send(SET_EVENT(cur_socket, SIM7600_EVENT_SEND_FAIL));
     }
 }
 
@@ -511,11 +511,11 @@ static void urc_func(const char *data, rt_size_t size)
 
     if (strstr(data, "WIFI CONNECTED"))
     {
-        LOG_I("ESP8266 WIFI is connected.");
+        LOG_I("SIM7600 WIFI is connected.");
     }
     else if (strstr(data, "WIFI DISCONNECT"))
     {
-        LOG_I("ESP8266 WIFI is disconnect.");
+        LOG_I("SIM7600 WIFI is disconnect.");
     }
 }
 
@@ -542,7 +542,7 @@ static struct at_urc urc_table[] = {
         }                                                                                         \
     } while (0);
 
-static void esp8266_init_thread_entry(void *parameter)
+static void sim7600_init_thread_entry(void *parameter)
 {
     at_response_t resp = RT_NULL;
     rt_err_t result = RT_EOK;
@@ -599,12 +599,12 @@ __exit:
     }
 }
 
-int esp8266_net_init(void)
+int sim7600_net_init(void)
 {
 #ifdef PKG_AT_INIT_BY_THREAD
     rt_thread_t tid;
 
-    tid = rt_thread_create("esp8266_net_init", esp8266_init_thread_entry, RT_NULL, ESP8266_THREAD_STACK_SIZE, ESP8266_THREAD_PRIORITY, 20);
+    tid = rt_thread_create("sim7600_net_init", sim7600_init_thread_entry, RT_NULL, SIM7600_THREAD_STACK_SIZE, SIM7600_THREAD_PRIORITY, 20);
     if (tid)
     {
         rt_thread_startup(tid);
@@ -614,13 +614,13 @@ int esp8266_net_init(void)
         LOG_E("Create AT initialization thread fail!");
     }
 #else
-    esp8266_init_thread_entry(RT_NULL);
+    sim7600_init_thread_entry(RT_NULL);
 #endif
 
     return RT_EOK;
 }
 
-int esp8266_ping(int argc, char **argv)
+int sim7600_ping(int argc, char **argv)
 {
     at_response_t resp = RT_NULL;
     static int icmp_seq;
@@ -669,16 +669,16 @@ int esp8266_ping(int argc, char **argv)
 
 #ifdef FINSH_USING_MSH
 #include <finsh.h>
-MSH_CMD_EXPORT_ALIAS(esp8266_net_init, at_net_init, initialize AT network);
-MSH_CMD_EXPORT_ALIAS(esp8266_ping, at_ping, AT ping network host);
+MSH_CMD_EXPORT_ALIAS(sim7600_net_init, at_net_init, initialize AT network);
+MSH_CMD_EXPORT_ALIAS(sim7600_ping, at_ping, AT ping network host);
 #endif
 
-static const struct at_device_ops esp8266_socket_ops = {
-    esp8266_socket_connect,
-    esp8266_socket_close,
-    esp8266_socket_send,
-    esp8266_domain_resolve,
-    esp8266_socket_set_event_cb,
+static const struct at_device_ops sim7600_socket_ops = {
+    sim7600_socket_connect,
+    sim7600_socket_close,
+    sim7600_socket_send,
+    sim7600_domain_resolve,
+    sim7600_socket_set_event_cb,
 };
 
 static int at_socket_device_init(void)
@@ -706,14 +706,14 @@ static int at_socket_device_init(void)
     /* register URC data execution function  */
     at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
 
-    /* initialize esp8266 network */
-    esp8266_net_init();
+    /* initialize sim7600 network */
+    sim7600_net_init();
 
-    /* set esp8266 AT Socket options */
-    at_socket_device_register(&esp8266_socket_ops);
+    /* set sim7600 AT Socket options */
+    at_socket_device_register(&sim7600_socket_ops);
 
     return RT_EOK;
 }
 //INIT_APP_EXPORT(at_socket_device_init);
 
-#endif /* AT_DEVICE_ESP8266 */
+#endif /* AT_DEVICE_SIM7600 */
