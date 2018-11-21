@@ -681,7 +681,7 @@ static const struct at_device_ops esp8266_socket_ops = {
     esp8266_socket_set_event_cb,
 };
 
-static int at_socket_device_init(void)
+int esp8266_at_socket_device_init(void)
 {
     /* create current AT socket event */
     at_socket_event = rt_event_create("at_se", RT_IPC_FLAG_FIFO);
