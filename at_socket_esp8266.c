@@ -548,7 +548,7 @@ static void esp8266_init_thread_entry(void *parameter)
     rt_err_t result = RT_EOK;
     rt_size_t i;
 
-    resp = at_create_resp(128, 0, 50 /* rt_tick_from_millisecond(5000)*/);
+    resp = at_create_resp(128, 0, 100 /* rt_tick_from_millisecond(5000)*/);
     if (!resp)
     {
         LOG_E("No memory for response structure!");
@@ -558,13 +558,14 @@ static void esp8266_init_thread_entry(void *parameter)
 
     rt_thread_delay(50 /*rt_tick_from_millisecond(5000)*/);
     /* reset module */
+    //   AT_SEND_CMD(resp, "AT+RESTORE");
     AT_SEND_CMD(resp, "AT+RST");
     /* reset waiting delay */
     rt_thread_delay(rt_tick_from_millisecond(1000));
     /* disable echo */
     AT_SEND_CMD(resp, "ATE0");
     /* set current mode to Wi-Fi station */
-    AT_SEND_CMD(resp, "AT+CWMODE=1");
+    AT_SEND_CMD(resp, "AT+CWMODE_CUR=1");
     /* get module version */
     AT_SEND_CMD(resp, "AT+GMR");
     /* show module version */
@@ -573,7 +574,7 @@ static void esp8266_init_thread_entry(void *parameter)
         LOG_D("%s", at_resp_get_line(resp, i + 1));
     }
     /* connect to WiFi AP */
-    if (at_exec_cmd(at_resp_set_info(resp, 128, 0, 20 * RT_TICK_PER_SECOND), "AT+CWJAP=\"%s\",\"%s\"",
+    if (at_exec_cmd(at_resp_set_info(resp, 128, 0, 30 * RT_TICK_PER_SECOND), "AT+CWJAP_CUR=\"%s\",\"%s\"",
                     AT_DEVICE_WIFI_SSID, AT_DEVICE_WIFI_PASSWORD) != RT_EOK)
     {
         LOG_E("AT network initialize failed, check ssid(%s) and password(%s).", AT_DEVICE_WIFI_SSID, AT_DEVICE_WIFI_PASSWORD);
@@ -702,10 +703,10 @@ int esp8266_at_socket_device_init(void)
 
     /* initialize AT client */
     at_client_init(AT_DEVICE_NAME, AT_DEVICE_RECV_BUFF_LEN);
-
+    LOG_E("at_set_urc_table");
     /* register URC data execution function  */
     at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
-
+    LOG_E("esp8266_net_init");
     /* initialize esp8266 network */
     esp8266_net_init();
 
@@ -714,6 +715,6 @@ int esp8266_at_socket_device_init(void)
 
     return RT_EOK;
 }
-//INIT_APP_EXPORT(at_socket_device_init);
+// INIT_APP_EXPORT(esp8266_at_socket_device_init);
 
 #endif /* AT_DEVICE_ESP8266 */
