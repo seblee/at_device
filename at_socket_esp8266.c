@@ -548,7 +548,7 @@ static void esp8266_init_thread_entry(void *parameter)
     rt_err_t result = RT_EOK;
     rt_size_t i;
 
-    resp = at_create_resp(128, 0, 100 /* rt_tick_from_millisecond(5000)*/);
+    resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
     if (!resp)
     {
         LOG_E("No memory for response structure!");
@@ -556,7 +556,7 @@ static void esp8266_init_thread_entry(void *parameter)
         goto __exit;
     }
 
-    rt_thread_delay(50 /*rt_tick_from_millisecond(5000)*/);
+    rt_thread_delay(rt_tick_from_millisecond(5000));
     /* reset module */
     //   AT_SEND_CMD(resp, "AT+RESTORE");
     AT_SEND_CMD(resp, "AT+RST");
