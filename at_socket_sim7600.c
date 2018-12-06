@@ -352,7 +352,6 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
     int i, result = RT_EOK;
     char recv_ip[16] = {0};
     at_response_t resp = RT_NULL;
-    int resolve_resule;
     RT_ASSERT(name);
     RT_ASSERT(ip);
 
@@ -374,7 +373,20 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
         }
 
         /* parse the third line of response data, get the IP address */
-        if (at_resp_parse_line_args_by_kw(resp, "+CDNSGIP:", "%*[^:]: %d,\"%*[^,],\"%s\"", &resolve_resule, recv_ip) < 0)
+        char *p = rt_strstr(resp->buf, "+CDNSGIP: ");
+        for (i = 0; i < resp->line_counts - 1; i++)
+        {
+            p = rt_strstr(at_resp_get_line(resp, i + 1), "+CDNSGIP: ");
+            if (p)
+                break;
+        }
+        if (!p)
+        {
+            rt_thread_delay(rt_tick_from_millisecond(100));
+            /* resolve failed, maybe receive an URC CRLF */
+            continue;
+        }
+        if ((sscanf(p, "%*[^,],\"%*[^,],\"%s\"", recv_ip)) < 0)
         {
             rt_thread_delay(rt_tick_from_millisecond(100));
             /* resolve failed, maybe receive an URC CRLF */
@@ -383,11 +395,15 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
         // "+CDNSGIP: 1,\"a1JOOi3mNEf.iot-as-mqtt.cn-shanghai.aliyuncs.com\",\"106.15.83.29\""
         // "%*[:]: %d,\"%1000[^\"]\",\"%s\""
 
-        LOG_E("resolve_resule:%d", resolve_resule);
         LOG_E("recv_ip:%s", recv_ip);
-
-        if (resolve_resule == 0)
+        LOG_E("resule:%s", p);
+        if (*(p + 10) == '0')
+        {
+            rt_thread_delay(rt_tick_from_millisecond(100));
+            /* resolve failed, maybe receive an URC CRLF */
             continue;
+        }
+
         if (strlen(recv_ip) < 8)
         {
             rt_thread_delay(rt_tick_from_millisecond(100));
@@ -637,7 +653,7 @@ static void sim7600_init_thread_entry(void *parameter)
         rt_thread_delay(rt_tick_from_millisecond(2000));
     } while (at_exec_cmd(resp, "AT") < 0);
     /* reset module */
-    AT_SEND_CMD(resp, "AT+CFUN=1,1");
+    // AT_SEND_CMD(resp, "AT+CFUN=1,1");
     /* reset waiting delay */
     rt_thread_delay(rt_tick_from_millisecond(5000));
     do
