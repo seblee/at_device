@@ -485,6 +485,20 @@ static void urc_cipclose_func(const char *data, rt_size_t size)
     }
 }
 
+static void urc_ipclose_func(const char *data, rt_size_t size)
+{
+    int socket, reason;
+
+    RT_ASSERT(data && size);
+    sscanf(data, "+IPCLOSE: %d,%d", &socket, &reason);
+    LOG_E("+IPCLOSE: %d,%d", socket, reason);
+    /* notice the socket is disconnect by remote */
+    if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
+    {
+        at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+    }
+}
+
 static void urc_recv_func(const char *data, rt_size_t size)
 {
     int socket = 0;
@@ -607,6 +621,7 @@ static struct at_urc urc_table[] = {
     {"+CIPSEND:", "\r\n", urc_send_func},
     {"+RECEIVE", "\r\n", urc_recv_func},
     {"+CIPCLOSE:", "\r\n", urc_cipclose_func},
+    {"+IPCLOSE:", "\r\n", urc_ipclose_func},
     {"+CPING", "\r\n", urc_ping_func},
     {"+CGMR", "\r\n", urc_cgmr_func},
     {"+CNTP:", "\r\n", urc_cntp_func},
