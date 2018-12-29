@@ -66,6 +66,17 @@ static at_evt_cb_t at_evt_cb_set[] = {
     [AT_SOCKET_EVT_RECV] = NULL,
     [AT_SOCKET_EVT_CLOSED] = NULL,
 };
+enum sim_state
+{
+    SIM7600_0 = 0,
+    SIM7600_1,
+    SIM7600_2,
+    SIM7600_3,
+    SIM7600_4,
+    SIM7600_5,
+};
+
+static enum sim_state module_state = SIM7600_0;
 
 static int at_socket_event_send(uint32_t event)
 {
@@ -872,5 +883,21 @@ int sim7600_at_socket_device_init(void)
     return RT_EOK;
 }
 //INIT_APP_EXPORT(sim7600_at_socket_device_init);
+int sim7600_module_device_init(rt_event_t event, rt_mutex_t lock)
+{
+    at_socket_event = event;
+    at_event_lock = lock;
+    LOG_E("at_set_urc_table");
+    /* register URC data execution function  */
+    at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
+    LOG_E("sim7600_net_init");
+    /* initialize sim7600 network */
+    sim7600_net_init();
+
+    /* set sim7600 AT Socket options */
+    at_socket_device_register(&sim7600_socket_ops);
+
+    return RT_EOK;
+}
 
 #endif /* AT_DEVICE_SIM7600 */

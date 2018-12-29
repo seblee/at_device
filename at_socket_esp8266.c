@@ -716,5 +716,18 @@ int esp8266_at_socket_device_init(void)
     return RT_EOK;
 }
 // INIT_APP_EXPORT(esp8266_at_socket_device_init);
+int esp8266_module_device_init(void)
+{
+    LOG_E("at_set_urc_table");
+    /* register URC data execution function  */
+    at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
+    LOG_E("esp8266_net_init");
+    /* initialize esp8266 network */
+    esp8266_net_init();
 
+    /* set esp8266 AT Socket options */
+    at_socket_device_register(&esp8266_socket_ops);
+
+    return RT_EOK;
+}
 #endif /* AT_DEVICE_ESP8266 */
