@@ -28,7 +28,7 @@
 
 #include <rtthread.h>
 #include <sys/socket.h>
-
+#include "modul_ctr.h"
 #include <at_socket.h>
 
 #if !defined(AT_SW_VERSION_NUM) || AT_SW_VERSION_NUM < 0x10200
@@ -548,6 +548,8 @@ static void esp8266_init_thread_entry(void *parameter)
     rt_err_t result = RT_EOK;
     rt_size_t i;
 
+    _module_state_t state = MODULE_INIT;
+    module_state(&state);
     resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
     if (!resp)
     {
@@ -593,10 +595,16 @@ __exit:
     if (!result)
     {
         LOG_I("AT network initialize success!");
+        state = MODULE_READY;
+        module_state(&state);
     }
     else
     {
         LOG_E("AT network initialize failed (%d)!", result);
+        state = MODULE_IDEL;
+        module_state(&state);
+        rt_thread_delay(rt_tick_from_millisecond(3000));
+        //  rt_sem_release(module_setup_sem);
     }
 }
 
@@ -703,10 +711,10 @@ int esp8266_at_socket_device_init(void)
 
     /* initialize AT client */
     at_client_init(AT_DEVICE_NAME, AT_DEVICE_RECV_BUFF_LEN);
-    LOG_E("at_set_urc_table");
+    LOG_D("at_set_urc_table");
     /* register URC data execution function  */
     at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
-    LOG_E("esp8266_net_init");
+    LOG_D("esp8266_net_init");
     /* initialize esp8266 network */
     esp8266_net_init();
 
@@ -716,12 +724,14 @@ int esp8266_at_socket_device_init(void)
     return RT_EOK;
 }
 // INIT_APP_EXPORT(esp8266_at_socket_device_init);
-int esp8266_module_device_init(void)
+int esp8266_module_device_init(rt_event_t event, rt_mutex_t lock)
 {
-    LOG_E("at_set_urc_table");
+    at_socket_event = event;
+    at_event_lock = lock;
+    LOG_D("at_set_urc_table");
     /* register URC data execution function  */
     at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
-    LOG_E("esp8266_net_init");
+    LOG_D("esp8266_net_init");
     /* initialize esp8266 network */
     esp8266_net_init();
 

@@ -28,7 +28,7 @@
 
 #include <rtthread.h>
 #include <sys/socket.h>
-
+#include "modul_ctr.h"
 #include <at_socket.h>
 
 #if !defined(AT_SW_VERSION_NUM) || AT_SW_VERSION_NUM < 0x10200
@@ -66,17 +66,6 @@ static at_evt_cb_t at_evt_cb_set[] = {
     [AT_SOCKET_EVT_RECV] = NULL,
     [AT_SOCKET_EVT_CLOSED] = NULL,
 };
-enum sim_state
-{
-    SIM7600_0 = 0,
-    SIM7600_1,
-    SIM7600_2,
-    SIM7600_3,
-    SIM7600_4,
-    SIM7600_5,
-};
-
-static enum sim_state module_state = SIM7600_0;
 
 static int at_socket_event_send(uint32_t event)
 {
@@ -502,7 +491,7 @@ static void urc_ipclose_func(const char *data, rt_size_t size)
 
     RT_ASSERT(data && size);
     sscanf(data, "+IPCLOSE: %d,%d", &socket, &reason);
-    LOG_E("+IPCLOSE: %d,%d", socket, reason);
+    LOG_W("+IPCLOSE: %d,%d", socket, reason);
     /* notice the socket is disconnect by remote */
     if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
     {
@@ -656,6 +645,9 @@ static void sim7600_init_thread_entry(void *parameter)
     rt_err_t result = RT_EOK;
     rt_size_t i;
 
+    _module_state_t state = MODULE_INIT;
+    module_state(&state);
+
     resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
     if (!resp)
     {
@@ -666,7 +658,7 @@ static void sim7600_init_thread_entry(void *parameter)
 
     // rt_thread_delay(rt_tick_from_millisecond(5000));
 
-    LOG_E("start init sim7600");
+    LOG_I("start init sim7600");
     i = 0;
     do
     {
@@ -770,11 +762,16 @@ __exit:
     if (!result)
     {
         LOG_I("AT network initialize success!");
-        // sim7600_ping(2, &host - 1);
+        state = MODULE_READY;
+        module_state(&state);
     }
     else
     {
         LOG_E("AT network initialize failed (%d)!", result);
+        state = MODULE_IDEL;
+        module_state(&state);
+        rt_thread_delay(rt_tick_from_millisecond(3000));
+        //  rt_sem_release(module_setup_sem);
     }
 }
 
@@ -887,10 +884,10 @@ int sim7600_module_device_init(rt_event_t event, rt_mutex_t lock)
 {
     at_socket_event = event;
     at_event_lock = lock;
-    LOG_E("at_set_urc_table");
+    LOG_D("at_set_urc_table");
     /* register URC data execution function  */
     at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
-    LOG_E("sim7600_net_init");
+    LOG_D("sim7600_net_init");
     /* initialize sim7600 network */
     sim7600_net_init();
 
