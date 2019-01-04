@@ -14,13 +14,16 @@
 **/
 /* Private include -----------------------------------------------------------*/
 #include <rtthread.h>
+#include "sys_conf.h"
 /* Private typedef -----------------------------------------------------------*/
 typedef enum _module_state
 {
     MODULE_IDEL,
     MODULE_INIT,
     MODULE_READY,
+    MODULE_REINIT,
 } _module_state_t;
+
 /* Private define ------------------------------------------------------------*/
 
 /* Private macro -------------------------------------------------------------*/
@@ -29,9 +32,11 @@ extern rt_sem_t module_setup_sem;
 /* Private function prototypes -----------------------------------------------*/
 
 /* Private functions ---------------------------------------------------------*/
-int esp8266_module_device_init(rt_event_t event, rt_mutex_t lock);
+int esp8266_module_device_init(rt_event_t event, rt_mutex_t lock, Net_Conf_st *netcon);
 
 int sim7600_module_device_init(rt_event_t event, rt_mutex_t lock);
 
 _module_state_t module_state(_module_state_t *state);
+
+int module_thread_start(void *parameter);
 /*----------------------------------------------------------------------------*/

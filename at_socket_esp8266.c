@@ -65,6 +65,9 @@ static at_evt_cb_t at_evt_cb_set[] = {
     [AT_SOCKET_EVT_CLOSED] = NULL,
 };
 
+static char Wifissid[32]; //wifi 賬號
+static char WifiKey[64];  //wifi 密碼
+
 static int at_socket_event_send(uint32_t event)
 {
     return (int)rt_event_send(at_socket_event, event);
@@ -577,7 +580,7 @@ static void esp8266_init_thread_entry(void *parameter)
     }
     /* connect to WiFi AP */
     if (at_exec_cmd(at_resp_set_info(resp, 128, 0, 30 * RT_TICK_PER_SECOND), "AT+CWJAP_CUR=\"%s\",\"%s\"",
-                    AT_DEVICE_WIFI_SSID, AT_DEVICE_WIFI_PASSWORD) != RT_EOK)
+                    Wifissid, WifiKey) != RT_EOK)
     {
         LOG_E("AT network initialize failed, check ssid(%s) and password(%s).", AT_DEVICE_WIFI_SSID, AT_DEVICE_WIFI_PASSWORD);
         result = -RT_ERROR;
@@ -724,13 +727,22 @@ int esp8266_at_socket_device_init(void)
     return RT_EOK;
 }
 // INIT_APP_EXPORT(esp8266_at_socket_device_init);
-int esp8266_module_device_init(rt_event_t event, rt_mutex_t lock)
+
+int esp8266_module_device_init(rt_event_t event, rt_mutex_t lock, Net_Conf_st *netcon)
 {
     at_socket_event = event;
     at_event_lock = lock;
     LOG_D("at_set_urc_table");
     /* register URC data execution function  */
     at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
+
+    rt_snprintf(Wifissid, sizeof(Wifissid), "%s", netcon->u16Wifi_Name);
+    rt_snprintf(WifiKey, sizeof(WifiKey), "%s", netcon->u16Wifi_Password);
+    // rt_strncpy(Wifissid, netcon->u16Wifi_Name, strlen(netcon->u16Wifi_Name));
+    // rt_strncpy(WifiKey, netcon->u16Wifi_Password, strlen(netcon->u16Wifi_Password));
+    LOG_I("Wifissid:%s", Wifissid);
+    LOG_I("WifiKey:%s", WifiKey);
+
     LOG_D("esp8266_net_init");
     /* initialize esp8266 network */
     esp8266_net_init();
