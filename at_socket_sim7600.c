@@ -614,9 +614,28 @@ static void urc_cclk_func(const char *data, rt_size_t size)
     sscanf(data, "+CCLK: \"%d/%d/%d,%d:%d:%d+%d\"", &yy, &mm, &dd, &hh, &MM, &ss, &zone);
     rt_kprintf("<time>:20%d-%d-%d %d:%d:%d %d\n", yy, mm, dd, hh, MM, ss, zone);
 }
+static void urc_cipevent_func(const char *data, rt_size_t size)
+{
+    RT_ASSERT(data && size);
+    if (strstr(data, "NETWORK CLOSED UNEXPECTEDLY"))
+    {
+        if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
+        {
+            at_evt_cb_set[AT_SOCKET_EVT_CLOSED](0, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+            at_evt_cb_set[AT_SOCKET_EVT_CLOSED](1, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+            at_evt_cb_set[AT_SOCKET_EVT_CLOSED](2, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+            at_evt_cb_set[AT_SOCKET_EVT_CLOSED](3, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+        }
+        if (module_state(RT_NULL) >= MODULE_4G_READY)
+        {
+            _module_state_t state = MODULE_REINIT;
+            module_state(&state);
+        }
+    }
+}
 
 static struct at_urc urc_table[] = {
-    {"+NETOPEN", "\r\n", urc_net_func},
+    {"+NETOPEN", "\r\n", urc_net_func}, //ned recode
     {"+CIPOPEN:", "\r\n", urc_cipopen_func},
     {"+CIPSEND:", "\r\n", urc_send_func},
     {"+RECEIVE", "\r\n", urc_recv_func},
@@ -626,7 +645,7 @@ static struct at_urc urc_table[] = {
     {"+CGMR", "\r\n", urc_cgmr_func},
     {"+CNTP:", "\r\n", urc_cntp_func},
     {"+CCLK:", "\r\n", urc_cclk_func},
-};
+    {"+CIPEVENT:", "\r\n", urc_cipevent_func}};
 
 #define AT_SEND_CMD(resp, cmd)                                                                    \
     do                                                                                            \
@@ -671,7 +690,7 @@ static void sim7600_init_thread_entry(void *parameter)
         rt_thread_delay(rt_tick_from_millisecond(2000));
     } while (at_exec_cmd(resp, "AT") < 0);
     /* reset module */
-    // AT_SEND_CMD(resp, "AT+CFUN=1,1");
+    AT_SEND_CMD(resp, "AT+CFUN=1,1");
     /* reset waiting delay */
     rt_thread_delay(rt_tick_from_millisecond(5000));
     do
@@ -762,7 +781,7 @@ __exit:
     if (!result)
     {
         LOG_I("AT network initialize success!");
-        state = MODULE_READY;
+        state = MODULE_4G_READY;
         module_state(&state);
     }
     else

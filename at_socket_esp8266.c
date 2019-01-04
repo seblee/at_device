@@ -598,7 +598,7 @@ __exit:
     if (!result)
     {
         LOG_I("AT network initialize success!");
-        state = MODULE_READY;
+        state = MODULE_WIFI_READY;
         module_state(&state);
     }
     else

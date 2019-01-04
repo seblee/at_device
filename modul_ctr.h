@@ -20,7 +20,8 @@ typedef enum _module_state
 {
     MODULE_IDEL,
     MODULE_INIT,
-    MODULE_READY,
+    MODULE_4G_READY,
+    MODULE_WIFI_READY,
     MODULE_REINIT,
 } _module_state_t;
 
