@@ -37,6 +37,9 @@
 
 #define LOG_TAG "at.sim7600"
 #include <at_log.h>
+#ifndef LOG_D
+#error "Please update the 'rtdbg.h' file to GitHub latest version (https://github.com/RT-Thread/rt-thread/blob/master/include/rtdbg.h)"
+#endif
 
 #ifdef AT_DEVICE_SIM7600
 
@@ -55,6 +58,8 @@
 #define SIM7600_EVNET_CLOSE_OK (1L << 3)
 #define SIM7600_EVENT_CONN_FAIL (1L << 4)
 #define SIM7600_EVENT_SEND_FAIL (1L << 5)
+#define SIM7600_EVENT_NETOPEN_OK (1L << 6)
+#define SIM7600_EVENT_NETOPEN_FAIL (1L << 7)
 
 #define RESOLVE_RETRY 5
 
@@ -355,7 +360,7 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
     RT_ASSERT(name);
     RT_ASSERT(ip);
 
-    resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
+    resp = at_create_resp(512, 0, rt_tick_from_millisecond(5000));
     if (!resp)
     {
         LOG_E("No memory for response structure!");
@@ -392,11 +397,9 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
             /* resolve failed, maybe receive an URC CRLF */
             continue;
         }
-        // "+CDNSGIP: 1,\"a1JOOi3mNEf.iot-as-mqtt.cn-shanghai.aliyuncs.com\",\"106.15.83.29\""
-        // "%*[:]: %d,\"%1000[^\"]\",\"%s\""
 
-        LOG_E("recv_ip:%s", recv_ip);
-        LOG_E("resule:%s", p);
+        LOG_I("recv_ip:%s", recv_ip);
+        LOG_I("resule:%s", p);
         if (*(p + 10) == '0')
         {
             rt_thread_delay(rt_tick_from_millisecond(100));
@@ -557,11 +560,10 @@ static void urc_net_func(const char *data, rt_size_t size)
     RT_ASSERT(data && size);
     sscanf(data, "+NETOPEN: %d", &result);
     if (result == 0)
-    {
-        LOG_I("opens packet network sucess...");
-    }
+        at_socket_event_send(SIM7600_EVENT_NETOPEN_OK);
     else
     {
+        at_socket_event_send(SIM7600_EVENT_NETOPEN_FAIL);
         LOG_I("opens packet network failed:%d", result);
     }
 }
@@ -633,9 +635,14 @@ static void urc_cipevent_func(const char *data, rt_size_t size)
         }
     }
 }
+static void urc_iperror_func(const char *data, rt_size_t size)
+{
+    RT_ASSERT(data && size);
+    LOG_E("ip error:%s\n", data + strlen("+IP ERROR: "));
+}
 
 static struct at_urc urc_table[] = {
-    {"+NETOPEN", "\r\n", urc_net_func}, //ned recode
+    {"+NETOPEN", "\r\n", urc_net_func},
     {"+CIPOPEN:", "\r\n", urc_cipopen_func},
     {"+CIPSEND:", "\r\n", urc_send_func},
     {"+RECEIVE", "\r\n", urc_recv_func},
@@ -645,7 +652,9 @@ static struct at_urc urc_table[] = {
     {"+CGMR", "\r\n", urc_cgmr_func},
     {"+CNTP:", "\r\n", urc_cntp_func},
     {"+CCLK:", "\r\n", urc_cclk_func},
-    {"+CIPEVENT:", "\r\n", urc_cipevent_func}};
+    {"+CIPEVENT:", "\r\n", urc_cipevent_func},
+    {"+IP ERROR: ", "\r\n", urc_iperror_func},
+};
 
 #define AT_SEND_CMD(resp, cmd)                                                                    \
     do                                                                                            \
@@ -663,10 +672,10 @@ static void sim7600_init_thread_entry(void *parameter)
     at_response_t resp = RT_NULL;
     rt_err_t result = RT_EOK;
     rt_size_t i;
-
+    int retry = 0;
     _module_state_t state = MODULE_INIT;
-    module_state(&state);
 
+_startinit:
     resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
     if (!resp)
     {
@@ -674,8 +683,6 @@ static void sim7600_init_thread_entry(void *parameter)
         result = -RT_ENOMEM;
         goto __exit;
     }
-
-    // rt_thread_delay(rt_tick_from_millisecond(5000));
 
     LOG_I("start init sim7600");
     i = 0;
@@ -686,13 +693,18 @@ static void sim7600_init_thread_entry(void *parameter)
             result = -RT_ENOMEM;
             goto __exit;
         }
-        i++;
         rt_thread_delay(rt_tick_from_millisecond(2000));
-    } while (at_exec_cmd(resp, "AT") < 0);
+    } while ((at_exec_cmd(resp, "AT") < 0) && (i++ < 200));
     /* reset module */
-    AT_SEND_CMD(resp, "AT+CFUN=1,1");
+    // AT_SEND_CMD(resp, "AT+CFUN=1,1");
+    AT_SEND_CMD(resp, "AT+CFUN=0");
+    rt_thread_delay(rt_tick_from_millisecond(2000));
+    AT_SEND_CMD(resp, "AT+CFUN=1");
+    // AT_SEND_CMD(resp, "AT+CRESET");
     /* reset waiting delay */
     rt_thread_delay(rt_tick_from_millisecond(5000));
+__re_init:
+    i = 0;
     do
     {
         if (i > RESOLVE_RETRY)
@@ -700,39 +712,35 @@ static void sim7600_init_thread_entry(void *parameter)
             result = -RT_ENOMEM;
             goto __exit;
         }
-        i++;
         rt_thread_delay(rt_tick_from_millisecond(2000));
-    } while (at_exec_cmd(resp, "AT") < 0);
+    } while ((at_exec_cmd(resp, "AT") < 0) && (i++ < 200));
     rt_thread_delay(rt_tick_from_millisecond(1000));
     /* disable echo */
     AT_SEND_CMD(resp, "ATE0");
     /* Request model identification */
     AT_SEND_CMD(resp, "AT+CGMM");
-    for (i = 0; i < resp->line_counts - 1; i++)
-    {
-        LOG_E("%s", at_resp_get_line(resp, i + 1));
-    }
     /* Request revision identification */
     AT_SEND_CMD(resp, "AT+CGMR");
     i = 10;
-
     do
     {
         //+CPIN: READY
         if (at_exec_cmd(at_resp_set_info(resp, 256, 4, rt_tick_from_millisecond(5000)), "AT+CPIN?") == RT_EOK)
         {
             /* parse the third line of response data, get the IP address */
-
-            if (strstr(at_resp_get_line(resp, 2), "+CPIN: READY"))
-                goto __checkRegister;
+            if (!strstr(at_resp_get_line(resp, 2), "+CPIN: READY"))
+            {
+                LOG_E("checkout sim card failed");
+                result = -RT_ENOMEM;
+                goto __exit;
+            }
+            else
+                break;
         }
-        i--;
         rt_thread_delay(rt_tick_from_millisecond(1000));
-    } while (i);
-    LOG_E("checkout sim card failed");
-    result = -RT_ENOMEM;
-    goto __exit;
-__checkRegister:
+    } while (i--);
+
+    i = 0;
     do
     {
         int ncode, stat;
@@ -747,7 +755,7 @@ __checkRegister:
                     break;
             }
         }
-    } while (1);
+    } while (i++ < 100);
     /* set ntc server */
     AT_SEND_CMD(resp, "AT+CNTP=\"ntp.aliyun.com\",32");
     /* operation ntc */
@@ -764,9 +772,29 @@ __checkRegister:
     /* Select TCP/IP application mode */
     AT_SEND_CMD(resp, "AT+CIPCCFG=10,0,0,1,1,0,500");
     // AT_SEND_CMD(resp, "AT+CIPCCFG?");
-
-    /* Open socket */
+    rt_thread_delay(rt_tick_from_millisecond(1000));
     AT_SEND_CMD(resp, "AT+NETOPEN");
+    /* Open socket */
+    int event_result;
+    if ((event_result = at_socket_event_recv(SIM7600_EVENT_NETOPEN_OK | SIM7600_EVENT_NETOPEN_FAIL, rt_tick_from_millisecond(5 * 1000),
+                                             RT_EVENT_FLAG_OR)) < 0)
+    {
+        LOG_E("AT+NETOPEN timeout.");
+        result = -RT_ETIMEOUT;
+        goto __exit;
+    }
+    /* check result */
+    if (event_result & SIM7600_EVENT_NETOPEN_OK)
+    {
+        LOG_I("netopen sucess.....");
+        result = RT_EOK;
+    }
+    else if (event_result & SIM7600_EVENT_NETOPEN_FAIL)
+    {
+        result = -RT_ERROR;
+        goto __exit;
+    }
+
     rt_thread_delay(rt_tick_from_millisecond(2000));
     /* Inquire socket PDP address */
     AT_SEND_CMD(resp, "AT+IPADDR");
@@ -787,10 +815,12 @@ __exit:
     else
     {
         LOG_E("AT network initialize failed (%d)!", result);
+        result = 0;
+        rt_thread_delay(rt_tick_from_millisecond(3000));
+        if (retry++ < RESOLVE_RETRY)
+            goto _startinit;
         state = MODULE_IDEL;
         module_state(&state);
-        rt_thread_delay(rt_tick_from_millisecond(3000));
-        //  rt_sem_release(module_setup_sem);
     }
 }
 
