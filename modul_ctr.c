@@ -102,12 +102,12 @@ void modul_control_thread_entry(void *parameter)
 
             // if (net_config.u16Net_Sel)
             {
-                DIR_7600;
+                DIR_7600();
                 sim7600_module_device_init(at_socket_event, at_event_lock);
             }
             // else
             // {
-            //     DIR_8266;
+            //     DIR_8266();
             //     if (net_config.u16Net_WifiSet == WIFI_SET)
             //     {
             //         esp8266_module_device_init(at_socket_event, at_event_lock, &net_config);

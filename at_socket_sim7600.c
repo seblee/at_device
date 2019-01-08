@@ -60,6 +60,9 @@
 #define SIM7600_EVENT_SEND_FAIL (1L << 5)
 #define SIM7600_EVENT_NETOPEN_OK (1L << 6)
 #define SIM7600_EVENT_NETOPEN_FAIL (1L << 7)
+#define SIM7600_EVENT_SOCEKT_ON (1L << 8)
+#define SIM7600_EVENT_SOCEKT_OFF (1L << 9)
+#define SIM7600_EVNET_CLOSE_FAIL (1L << 10)
 
 #define RESOLVE_RETRY 5
 
@@ -91,6 +94,61 @@ static int at_socket_event_recv(uint32_t event, uint32_t timeout, rt_uint8_t opt
     return recved;
 }
 
+static int sim7600_isSocket_connected(int socket)
+{
+    at_response_t resp = RT_NULL;
+    int result = RT_EOK, event_result = 0;
+    resp = at_create_resp(64, 0, rt_tick_from_millisecond(5000));
+    if (!resp)
+    {
+        LOG_E("No memory for response structure!");
+        return -RT_ENOMEM;
+    }
+    rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
+    cur_socket = socket;
+    /*check socket connect state*/
+    if (at_exec_cmd(resp, "AT+CIPCLOSE?") < 0)
+    {
+        result = -RT_ERROR;
+        goto __exit;
+    }
+    /* waiting result event from AT URC */
+    if (at_socket_event_recv(SET_EVENT(socket, 0), rt_tick_from_millisecond(300 * 3), RT_EVENT_FLAG_OR) < 0)
+    {
+        LOG_E("socket (%d) send failed, wait connect result timeout.", socket);
+        result = -RT_ETIMEOUT;
+        goto __exit;
+    }
+    /* waiting OK or failed result */
+    if ((event_result = at_socket_event_recv(SIM7600_EVENT_SOCEKT_ON | SIM7600_EVENT_SOCEKT_OFF, rt_tick_from_millisecond(1 * 1000),
+                                             RT_EVENT_FLAG_OR)) < 0)
+    {
+        LOG_E("socket (%d) send failed, wait connect OK|FAIL timeout.", socket);
+        result = -RT_ETIMEOUT;
+        goto __exit;
+    } /* check result */
+    if (event_result & SIM7600_EVENT_SOCEKT_ON)
+    {
+        result = 1;
+        goto __exit;
+    }
+    else if (event_result & SIM7600_EVENT_SOCEKT_OFF)
+    {
+        result = 0;
+        goto __exit;
+    }
+
+__exit:
+    rt_mutex_release(at_event_lock);
+
+    if (resp)
+    {
+        at_delete_resp(resp);
+    }
+
+    return result;
+}
+
 /**
  * close socket by AT commands.
  *
@@ -104,7 +162,7 @@ static int at_socket_event_recv(uint32_t event, uint32_t timeout, rt_uint8_t opt
 static int sim7600_socket_close(int socket)
 {
     at_response_t resp = RT_NULL;
-    int result = RT_EOK;
+    int result = RT_EOK, event_result = 0;
 
     resp = at_create_resp(64, 0, rt_tick_from_millisecond(5000));
     if (!resp)
@@ -115,10 +173,44 @@ static int sim7600_socket_close(int socket)
 
     rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
 
-    if (at_exec_cmd(resp, "AT+CIPCLOSE=%d", socket) < 0)
-    {
-        result = -RT_ERROR;
+    /*check socket connect state*/
+    result = sim7600_isSocket_connected(socket);
+    if (result < 0)
         goto __exit;
+    else if (result == 0)
+    {
+        /* notice the socket is disconnect by remote */
+        if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
+        {
+            at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+        }
+    }
+    else
+    {
+        if (at_exec_cmd(resp, "AT+CIPCLOSE=%d", socket) < 0)
+        {
+            result = -RT_ERROR;
+            goto __exit;
+        }
+        /* waiting result event from AT URC */
+        if (at_socket_event_recv(SET_EVENT(socket, 0), rt_tick_from_millisecond(300 * 3), RT_EVENT_FLAG_OR) < 0)
+        {
+            LOG_E("socket (%d) send failed, wait connect result timeout.", socket);
+            result = -RT_ETIMEOUT;
+            goto __exit;
+        }
+        /* waiting OK or failed result */
+        if ((event_result = at_socket_event_recv(SIM7600_EVNET_CLOSE_OK | SIM7600_EVNET_CLOSE_FAIL, rt_tick_from_millisecond(1 * 1000),
+                                                 RT_EVENT_FLAG_OR)) < 0)
+        {
+            LOG_E("socket (%d) send failed, wait connect OK|FAIL timeout.", socket);
+            result = -RT_ETIMEOUT;
+            goto __exit;
+        } /* check result */
+        if (event_result & SIM7600_EVNET_CLOSE_OK)
+            result = RT_EOK;
+        else if (event_result & SIM7600_EVNET_CLOSE_FAIL)
+            result = -RT_ERROR;
     }
 
 __exit:
@@ -161,8 +253,19 @@ static int sim7600_socket_connect(int socket, char *ip, int32_t port, enum at_so
         LOG_E("No memory for response structure!");
         return -RT_ENOMEM;
     }
-
     rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
+    cur_socket = socket;
+    /*check socket connect state*/
+    result = sim7600_isSocket_connected(socket);
+
+    if (result < 0)
+        goto __exit;
+    else if (result == 1)
+    {
+        result = sim7600_socket_close(socket);
+        if (result < 0)
+            goto __exit;
+    }
 
 __retry:
     if (is_client)
@@ -385,7 +488,7 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
             if (p)
                 break;
         }
-        if (!p)
+        if (!p) 
         {
             rt_thread_delay(rt_tick_from_millisecond(100));
             /* resolve failed, maybe receive an URC CRLF */
@@ -398,8 +501,7 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
             continue;
         }
 
-        LOG_I("recv_ip:%s", recv_ip);
-        LOG_I("resule:%s", p);
+        LOG_I("recv_ip:%s,resule:%s", recv_ip, p);
         if (*(p + 10) == '0')
         {
             rt_thread_delay(rt_tick_from_millisecond(100));
@@ -450,9 +552,9 @@ static void urc_send_func(const char *data, rt_size_t size)
 {
     int socket, reqSendLength = 0, cnfSendLength = 0;
     RT_ASSERT(data && size);
+    // LOG_I("urc_send:%d", size);
     sscanf(data, "+CIPSEND: %d,%d,%d", &socket, &reqSendLength, &cnfSendLength);
     cur_send_bfsz = cnfSendLength;
-
     if (reqSendLength == cnfSendLength)
     {
         at_socket_event_send(SET_EVENT(cur_socket, SIM7600_EVENT_SEND_OK));
@@ -467,6 +569,7 @@ static void urc_cipopen_func(const char *data, rt_size_t size)
     int socket, err;
 
     RT_ASSERT(data && size);
+    // LOG_I("urc_cipopen:%d", size);
     sscanf(data, "+CIPOPEN: %d,%d", &socket, &err);
     if (err == 0)
         at_socket_event_send(SET_EVENT(socket, SIM7600_EVENT_CONN_OK));
@@ -476,15 +579,28 @@ static void urc_cipopen_func(const char *data, rt_size_t size)
 
 static void urc_cipclose_func(const char *data, rt_size_t size)
 {
-    int socket, err;
+    int socket[10], err;
     RT_ASSERT(data && size);
-    sscanf(data, "+CIPCLOSE: %d,%d", &socket, &err);
-    rt_kprintf("Socket:%d Close %s\n", socket, (err == 0) ? "Sucess" : "Failed");
-
-    /* notice the socket is disconnect by remote */
-    if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
+    LOG_I("urc_cipclose:%d", size);
+    if (size < 20)
     {
-        at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+        sscanf(data, "+CIPCLOSE: %d,%d", &socket[0], &err);
+        rt_kprintf("Socket:%d Close %s\n", socket, (err == 0) ? "Sucess" : "Failed");
+        at_socket_event_send(SET_EVENT(socket[0], (err == 0) ? SIM7600_EVNET_CLOSE_OK : SIM7600_EVNET_CLOSE_FAIL));
+
+        /* notice the socket is disconnect by remote */
+        if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
+        {
+            at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket[0], AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+        }
+    }
+    else
+    {
+        sscanf(data, "+CIPCLOSE: %d,%d,%d,%d,%d,%d,%d,%d,%d,%d", &socket[0], &socket[1], &socket[2], &socket[3], &socket[4], &socket[5], &socket[6], &socket[7], &socket[8], &socket[9]);
+        if (socket[cur_socket] == 1)
+            at_socket_event_send(SET_EVENT(cur_socket, SIM7600_EVENT_SOCEKT_ON));
+        else if (socket[cur_socket] == 0)
+            at_socket_event_send(SET_EVENT(cur_socket, SIM7600_EVENT_SOCEKT_OFF));
     }
 }
 
@@ -493,6 +609,7 @@ static void urc_ipclose_func(const char *data, rt_size_t size)
     int socket, reason;
 
     RT_ASSERT(data && size);
+    // LOG_I("urc_ipclose:%d", size);
     sscanf(data, "+IPCLOSE: %d,%d", &socket, &reason);
     LOG_W("+IPCLOSE: %d,%d", socket, reason);
     /* notice the socket is disconnect by remote */
@@ -510,7 +627,7 @@ static void urc_recv_func(const char *data, rt_size_t size)
     char *recv_buf = RT_NULL, temp[8];
 
     RT_ASSERT(data && size);
-
+    // LOG_I("urc_recv:%d", size);
     /* get the current socket and receive buffer size by receive data */
     sscanf(data, "+RECEIVE,%d,%d", &socket, (int *)&bfsz);
     /* get receive timeout by receive buffer length */
@@ -558,6 +675,7 @@ static void urc_net_func(const char *data, rt_size_t size)
 {
     int result;
     RT_ASSERT(data && size);
+    // LOG_I("urc_netopen:%d", size);
     sscanf(data, "+NETOPEN: %d", &result);
     if (result == 0)
         at_socket_event_send(SIM7600_EVENT_NETOPEN_OK);
@@ -573,8 +691,8 @@ static void urc_ping_func(const char *data, rt_size_t size)
     int result_type, data_packet_size, rtt, TTL;
     int num_pkts_sent, num_pkts_recvd, num_pkts_lost, min_rtt, max_rtt, avg_rtt;
     char resolved_ip_addr[16];
-
     RT_ASSERT(data && size);
+    // LOG_I("urc_ping:%d", size);
     sscanf(data, "+CPING: %d,%*s", &result_type);
 
     switch (result_type)
@@ -597,12 +715,14 @@ static void urc_ping_func(const char *data, rt_size_t size)
 static void urc_cgmr_func(const char *data, rt_size_t size)
 {
     RT_ASSERT(data && size);
+    // LOG_I("urc_cgmr:%d", size);
     rt_kprintf("Firmware:%s\n", data + strlen("+CGMR: "));
 }
 static void urc_cntp_func(const char *data, rt_size_t size)
 {
     int err;
     RT_ASSERT(data && size);
+    // LOG_I("urc_cntp:%d", size);
     sscanf(data, "+CNTP: %d", &err);
     if (err == 0)
     {
@@ -613,12 +733,14 @@ static void urc_cclk_func(const char *data, rt_size_t size)
 {
     int yy, mm, dd, hh, MM, ss, zone;
     RT_ASSERT(data && size);
+    // LOG_I("urc_cclk:%d", size);
     sscanf(data, "+CCLK: \"%d/%d/%d,%d:%d:%d+%d\"", &yy, &mm, &dd, &hh, &MM, &ss, &zone);
     rt_kprintf("<time>:20%d-%d-%d %d:%d:%d %d\n", yy, mm, dd, hh, MM, ss, zone);
 }
 static void urc_cipevent_func(const char *data, rt_size_t size)
 {
     RT_ASSERT(data && size);
+    // LOG_I("urc_cipevent:%d", size);
     if (strstr(data, "NETWORK CLOSED UNEXPECTEDLY"))
     {
         if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
@@ -638,7 +760,21 @@ static void urc_cipevent_func(const char *data, rt_size_t size)
 static void urc_iperror_func(const char *data, rt_size_t size)
 {
     RT_ASSERT(data && size);
+    // LOG_I("urc_iperror:%d", size);
     LOG_E("ip error:%s\n", data + strlen("+IP ERROR: "));
+}
+static void urc_pbdone_func(const char *data, rt_size_t size)
+{
+    RT_ASSERT(data && size);
+    // LOG_I("urc_pbdone:%d", size);
+    if (strstr(data, "PB DONE"))
+    {
+        if (module_state(RT_NULL) >= MODULE_4G_READY)
+        {
+            _module_state_t state = MODULE_REINIT;
+            module_state(&state);
+        }
+    }
 }
 
 static struct at_urc urc_table[] = {
@@ -654,6 +790,7 @@ static struct at_urc urc_table[] = {
     {"+CCLK:", "\r\n", urc_cclk_func},
     {"+CIPEVENT:", "\r\n", urc_cipevent_func},
     {"+IP ERROR: ", "\r\n", urc_iperror_func},
+    {"PB DONE", "\r\n", urc_pbdone_func},
 };
 
 #define AT_SEND_CMD(resp, cmd)                                                                    \
@@ -697,13 +834,13 @@ _startinit:
     } while ((at_exec_cmd(resp, "AT") < 0) && (i++ < 200));
     /* reset module */
     // AT_SEND_CMD(resp, "AT+CFUN=1,1");
+    // AT_SEND_CMD(resp, "AT+CRESET");
     AT_SEND_CMD(resp, "AT+CFUN=0");
     rt_thread_delay(rt_tick_from_millisecond(2000));
     AT_SEND_CMD(resp, "AT+CFUN=1");
-    // AT_SEND_CMD(resp, "AT+CRESET");
     /* reset waiting delay */
     rt_thread_delay(rt_tick_from_millisecond(5000));
-__re_init:
+
     i = 0;
     do
     {
