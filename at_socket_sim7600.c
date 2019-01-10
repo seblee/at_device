@@ -488,7 +488,7 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
             if (p)
                 break;
         }
-        if (!p) 
+        if (!p)
         {
             rt_thread_delay(rt_tick_from_millisecond(100));
             /* resolve failed, maybe receive an URC CRLF */
@@ -534,6 +534,43 @@ __exit:
     return result;
 }
 
+/**
+ * cclk by AT commands.
+ *
+ * @param name domain name
+ * @param get module rtc
+ */
+int sim7600_cclk_cmd(void)
+{
+
+    int result = RT_EOK;
+    at_response_t resp = RT_NULL;
+
+    resp = at_create_resp(512, 0, rt_tick_from_millisecond(5000));
+    if (!resp)
+    {
+        LOG_E("No memory for response structure!");
+        return -RT_ENOMEM;
+    }
+
+    rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
+
+    if (at_exec_cmd(resp, "AT+CCLK?") < 0)
+    {
+        result = -RT_ERROR;
+        goto __exit;
+    }
+
+__exit:
+    rt_mutex_release(at_event_lock);
+
+    if (resp)
+    {
+        at_delete_resp(resp);
+    }
+
+    return result;
+}
 /**
  * set AT socket event notice callback
  *
@@ -726,16 +763,32 @@ static void urc_cntp_func(const char *data, rt_size_t size)
     sscanf(data, "+CNTP: %d", &err);
     if (err == 0)
     {
-        rt_kprintf(data);
+        LOG_I("CNTP START");
     }
 }
 static void urc_cclk_func(const char *data, rt_size_t size)
 {
     int yy, mm, dd, hh, MM, ss, zone;
+    time_t now;
+    struct tm ti;
+    rt_device_t device;
     RT_ASSERT(data && size);
     // LOG_I("urc_cclk:%d", size);
     sscanf(data, "+CCLK: \"%d/%d/%d,%d:%d:%d+%d\"", &yy, &mm, &dd, &hh, &MM, &ss, &zone);
     rt_kprintf("<time>:20%d-%d-%d %d:%d:%d %d\n", yy, mm, dd, hh, MM, ss, zone);
+    ti.tm_year = yy + 2000 - 1900;
+    ti.tm_mon = mm - 1;
+    ti.tm_mday = dd;
+    ti.tm_hour = hh;
+    ti.tm_min = MM;
+    ti.tm_sec = ss;
+    now = mktime(&ti);
+    now -= zone * 900;
+    device = rt_device_find("rtc");
+    if (device != RT_NULL)
+    {
+        rt_device_control(device, RT_DEVICE_CTRL_RTC_SET_TIME, &now);
+    }
 }
 static void urc_cipevent_func(const char *data, rt_size_t size)
 {
@@ -811,7 +864,13 @@ static void sim7600_init_thread_entry(void *parameter)
     rt_size_t i;
     int retry = 0;
     _module_state_t state = MODULE_INIT;
+    static rt_uint8_t thread_active = 0;
 
+    if (thread_active)
+        return;
+    else
+        thread_active = 1;
+    module_state(&state);
 _startinit:
     resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
     if (!resp)
@@ -936,6 +995,10 @@ _startinit:
     /* Inquire socket PDP address */
     AT_SEND_CMD(resp, "AT+IPADDR");
     /* show module version */
+    rt_thread_delay(rt_tick_from_millisecond(2000));
+    /* Inquire socket PDP address */
+    AT_SEND_CMD(resp, "AT+CCLK?");
+    /* show module version */
 
 __exit:
     if (resp)
@@ -959,6 +1022,7 @@ __exit:
         state = MODULE_IDEL;
         module_state(&state);
     }
+    thread_active = 0;
 }
 
 int sim7600_net_init(void)

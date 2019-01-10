@@ -28,7 +28,7 @@
 /* Private typedef -----------------------------------------------------------*/
 
 /* Private define ------------------------------------------------------------*/
-
+#define TIME_SYNC_SHIELD 3600 //second
 /* Private macro -------------------------------------------------------------*/
 
 /* Private variables ---------------------------------------------------------*/
@@ -56,7 +56,7 @@ void modul_control_thread_entry(void *parameter)
 {
     rt_err_t result;
     Net_Conf_st net_config;
-
+    static rt_uint16_t u16Net_Sel_bak = 0, count = 0;
     module_setup_sem = rt_sem_create("sem", 0, RT_IPC_FLAG_FIFO);
     if (module_setup_sem == RT_NULL)
     {
@@ -91,15 +91,24 @@ void modul_control_thread_entry(void *parameter)
     rt_sem_release(module_setup_sem);
     do
     {
-        result = rt_sem_take(module_setup_sem, RT_WAITING_FOREVER);
+        result = rt_sem_take(module_setup_sem, 1000);
         if (result == -RT_ETIMEOUT)
         {
+
+            if (count++ > TIME_SYNC_SHIELD)
+            {
+                count = 0;
+                if (u16Net_Sel_bak)
+                    sim7600_cclk_cmd();
+            }
+            network_Conversion_wifi_parpmeter(&g_sys.config.ComPara.Net_Conf, &net_config);
+            if (u16Net_Sel_bak != net_config.u16Net_Sel)
+                rt_sem_release(module_setup_sem);
         }
         else
         {
             LOG_I("Moudule initialize start......");
-            network_Conversion_wifi_parpmeter(&g_sys.config.ComPara.Net_Conf, &net_config);
-
+            u16Net_Sel_bak = net_config.u16Net_Sel;
             // if (net_config.u16Net_Sel)
             {
                 DIR_7600();

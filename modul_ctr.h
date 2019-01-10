@@ -37,6 +37,8 @@ int esp8266_module_device_init(rt_event_t event, rt_mutex_t lock, Net_Conf_st *n
 
 int sim7600_module_device_init(rt_event_t event, rt_mutex_t lock);
 
+int sim7600_cclk_cmd(void);
+
 _module_state_t module_state(_module_state_t *state);
 
 int module_thread_start(void *parameter);
