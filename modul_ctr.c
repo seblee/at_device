@@ -23,7 +23,7 @@
 #include <at_socket.h>
 #include "network.h"
 
-#define LOG_TAG "at.esp8266"
+#define LOG_TAG "module.ctr"
 #include <at_log.h>
 /* Private typedef -----------------------------------------------------------*/
 
@@ -55,8 +55,10 @@ extern sys_reg_st g_sys;
 void modul_control_thread_entry(void *parameter)
 {
     rt_err_t result;
-    Net_Conf_st net_config;
+    static Net_Conf_st net_config;
     static rt_uint16_t u16Net_Sel_bak = 0, count = 0;
+    _module_state_t state = MODULE_REINIT;
+
     module_setup_sem = rt_sem_create("sem", 0, RT_IPC_FLAG_FIFO);
     if (module_setup_sem == RT_NULL)
     {
@@ -92,36 +94,42 @@ void modul_control_thread_entry(void *parameter)
     do
     {
         result = rt_sem_take(module_setup_sem, 1000);
+        network_Conversion_wifi_parpmeter(&g_sys.config.ComPara.Net_Conf, &net_config);
         if (result == -RT_ETIMEOUT)
         {
-
             if (count++ > TIME_SYNC_SHIELD)
             {
                 count = 0;
                 if (u16Net_Sel_bak)
                     sim7600_cclk_cmd();
             }
-            network_Conversion_wifi_parpmeter(&g_sys.config.ComPara.Net_Conf, &net_config);
             if (u16Net_Sel_bak != net_config.u16Net_Sel)
-                rt_sem_release(module_setup_sem);
+            {
+                if (module_state(RT_NULL) >= MODULE_4G_READY)
+                {
+                    module_state(&state);
+                }
+            }
         }
         else
         {
             LOG_I("Moudule initialize start......");
             u16Net_Sel_bak = net_config.u16Net_Sel;
+            state = MODULE_IDEL;
+            module_state(&state);
             // if (net_config.u16Net_Sel)
-            {
-                DIR_7600();
-                sim7600_module_device_init(at_socket_event, at_event_lock);
-            }
-            // else
             // {
-            //     DIR_8266();
-            //     if (net_config.u16Net_WifiSet == WIFI_SET)
-            //     {
-            //         esp8266_module_device_init(at_socket_event, at_event_lock, &net_config);
-            //     }
+            //     DIR_7600();
+            //     sim7600_module_device_init(at_socket_event, at_event_lock);
             // }
+            // else
+            {
+                DIR_8266();
+                // if (net_config.u16Net_WifiSet == WIFI_SET)
+                // {
+                esp8266_module_device_init(at_socket_event, at_event_lock, &net_config);
+                // }
+            }
         }
     } while (1);
 _exit:

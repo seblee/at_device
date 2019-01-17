@@ -175,16 +175,8 @@ static int sim7600_socket_close(int socket)
 
     /*check socket connect state*/
     result = sim7600_isSocket_connected(socket);
-    if (result < 0)
+    if (result <= 0)
         goto __exit;
-    else if (result == 0)
-    {
-        /* notice the socket is disconnect by remote */
-        if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
-        {
-            at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
-        }
-    }
     else
     {
         if (at_exec_cmd(resp, "AT+CIPCLOSE=%d", socket) < 0)
@@ -214,6 +206,11 @@ static int sim7600_socket_close(int socket)
     }
 
 __exit:
+    /* notice the socket is disconnect by remote */
+    if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
+    {
+        at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+    }
     rt_mutex_release(at_event_lock);
 
     if (resp)
@@ -880,7 +877,7 @@ _startinit:
         goto __exit;
     }
 
-    LOG_I("start init sim7600");
+    LOG_I("start init");
     i = 0;
     do
     {
