@@ -680,7 +680,7 @@ static void urc_status_func(const char *data, rt_size_t size)
 {
     int state = 0;
     RT_ASSERT(data && size);
-    LOG_I("STATUS:%d", size);
+    // LOG_I("STATUS:%d", size);
     sscanf(data, "STATUS:%d", &state);
     cur_status = state;
     at_socket_event_send(SET_EVENT(cur_socket, ESP8266_EVENT_STATUS_GET));
@@ -697,7 +697,7 @@ static void urc_cipstatus_fun(const char *data, rt_size_t size)
 static void urc_already_fun(const char *data, rt_size_t size)
 {
     RT_ASSERT(data && size);
-    LOG_I("CIPSTATUS:%d", size);
+    // LOG_I("already:%d", size);
     if (strstr(data, "ALREADY CONNECTED"))
         at_socket_event_send(SET_EVENT(cur_socket, ESP8266_EVENT_SOCEKT_ON));
 }

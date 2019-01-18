@@ -175,8 +175,15 @@ static int sim7600_socket_close(int socket)
 
     /*check socket connect state*/
     result = sim7600_isSocket_connected(socket);
-    if (result <= 0)
+    if (result < 0)
         goto __exit;
+    else if (result == 0)
+    {
+        if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
+        {
+            at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
+        }
+    }
     else
     {
         if (at_exec_cmd(resp, "AT+CIPCLOSE=%d", socket) < 0)
@@ -201,16 +208,13 @@ static int sim7600_socket_close(int socket)
         } /* check result */
         if (event_result & SIM7600_EVNET_CLOSE_OK)
             result = RT_EOK;
-        else if (event_result & SIM7600_EVNET_CLOSE_FAIL)
-            result = -RT_ERROR;
+        // else if (event_result & SIM7600_EVNET_CLOSE_FAIL)
+        //     result = -RT_ERROR;
     }
 
 __exit:
     /* notice the socket is disconnect by remote */
-    if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
-    {
-        at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
-    }
+
     rt_mutex_release(at_event_lock);
 
     if (resp)
@@ -498,7 +502,7 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
             continue;
         }
 
-        LOG_I("recv_ip:%s,resule:%s", recv_ip, p);
+        // LOG_I("recv_ip:%s,resule:%s", recv_ip, p);
         if (*(p + 10) == '0')
         {
             rt_thread_delay(rt_tick_from_millisecond(100));
@@ -615,7 +619,7 @@ static void urc_cipclose_func(const char *data, rt_size_t size)
 {
     int socket[10], err;
     RT_ASSERT(data && size);
-    LOG_I("urc_cipclose:%d", size);
+    // LOG_I("urc_cipclose:%d", size);
     if (size < 20)
     {
         sscanf(data, "+CIPCLOSE: %d,%d", &socket[0], &err);
