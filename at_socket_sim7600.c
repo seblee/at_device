@@ -619,11 +619,12 @@ static void urc_cipclose_func(const char *data, rt_size_t size)
 {
     int socket[10], err;
     RT_ASSERT(data && size);
-    // LOG_I("urc_cipclose:%d", size);
+    LOG_I("urc_cipclose:%d", size);
     if (size < 20)
     {
         sscanf(data, "+CIPCLOSE: %d,%d", &socket[0], &err);
-        rt_kprintf("Socket:%d Close %s\n", socket, (err == 0) ? "Sucess" : "Failed");
+        // rt_kprintf("Socket:%d Close %s\n", socket, (err == 0) ? "Sucess" : "Failed");
+        LOG_W("+CIPCLOSE: %d,%d", socket[0], err);
         at_socket_event_send(SET_EVENT(socket[0], (err == 0) ? SIM7600_EVNET_CLOSE_OK : SIM7600_EVNET_CLOSE_FAIL));
 
         /* notice the socket is disconnect by remote */
@@ -794,7 +795,7 @@ static void urc_cclk_func(const char *data, rt_size_t size)
 static void urc_cipevent_func(const char *data, rt_size_t size)
 {
     RT_ASSERT(data && size);
-    // LOG_I("urc_cipevent:%d", size);
+    LOG_I("urc_cipevent:%d", size);
     if (strstr(data, "NETWORK CLOSED UNEXPECTEDLY"))
     {
         if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
