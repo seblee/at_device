@@ -208,8 +208,8 @@ static int sim7600_socket_close(int socket)
         } /* check result */
         if (event_result & SIM7600_EVNET_CLOSE_OK)
             result = RT_EOK;
-        // else if (event_result & SIM7600_EVNET_CLOSE_FAIL)
-        //     result = -RT_ERROR;
+        else if (event_result & SIM7600_EVNET_CLOSE_FAIL)
+            result = -RT_ERROR;
     }
 
 __exit:
@@ -221,7 +221,7 @@ __exit:
     {
         at_delete_resp(resp);
     }
-
+    result = 0;
     return result;
 }
 
@@ -864,7 +864,7 @@ static void sim7600_init_thread_entry(void *parameter)
     at_response_t resp = RT_NULL;
     rt_err_t result = RT_EOK;
     rt_size_t i;
-    int retry = 0;
+    static int retry = 0;
     _module_state_t state = MODULE_INIT;
     static rt_uint8_t thread_active = 0;
 
@@ -873,7 +873,7 @@ static void sim7600_init_thread_entry(void *parameter)
     else
         thread_active = 1;
     module_state(&state);
-_startinit:
+ 
     resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
     if (!resp)
     {
@@ -1013,6 +1013,7 @@ __exit:
         LOG_I("AT network initialize success!");
         state = MODULE_4G_READY;
         module_state(&state);
+        retry = 0;
     }
     else
     {
@@ -1020,8 +1021,9 @@ __exit:
         result = 0;
         rt_thread_delay(rt_tick_from_millisecond(3000));
         if (retry++ < RESOLVE_RETRY)
-            goto _startinit;
-        state = MODULE_IDEL;
+            state = MODULE_REINIT;
+        else
+            state = MODULE_IDEL;
         module_state(&state);
     }
     thread_active = 0;
