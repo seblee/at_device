@@ -90,7 +90,6 @@ void modul_control_thread_entry(void *parameter)
     /* initialize AT client */
     at_client_init(AT_DEVICE_NAME, AT_DEVICE_RECV_BUFF_LEN);
     rt_thread_delay(rt_tick_from_millisecond(2000));
-    rt_sem_release(module_setup_sem);
     do
     {
         result = rt_sem_take(module_setup_sem, 1000);
@@ -100,34 +99,47 @@ void modul_control_thread_entry(void *parameter)
             if (count++ > TIME_SYNC_SHIELD)
             {
                 count = 0;
-                if (u16Net_Sel_bak)
+                if ((u16Net_Sel_bak) && (module_state(RT_NULL) == MODULE_4G_READY))
+                {
                     sim7600_cclk_cmd();
+                }
             }
             if (u16Net_Sel_bak != net_config.u16Net_Sel)
             {
-                if (module_state(RT_NULL) >= MODULE_4G_READY)
+                if ((module_state(RT_NULL) == MODULE_4G_READY) ||
+                    (module_state(RT_NULL) == MODULE_WIFI_READY))
                 {
+                    LOG_I("Moudule set MODULE_REINIT......");
                     state = MODULE_REINIT;
                     module_state(&state);
+                }
+                else if (module_state(RT_NULL) == MODULE_IDEL)
+                {
+                    rt_sem_release(module_setup_sem);
                 }
             }
         }
         else
         {
             LOG_I("Moudule initialize start......");
-            u16Net_Sel_bak = net_config.u16Net_Sel;
-            state = MODULE_IDEL;
-            module_state(&state);
             if (net_config.u16Net_Sel)
             {
+                u16Net_Sel_bak = net_config.u16Net_Sel;
                 DIR_7600();
+                state = MODULE_IDEL;
+                module_state(&state);
                 sim7600_module_device_init(at_socket_event, at_event_lock);
             }
             else
             {
-                DIR_8266();
                 if (net_config.u16Net_WifiSet == WIFI_SET)
+                {
+                    DIR_8266();
+                    u16Net_Sel_bak = net_config.u16Net_Sel;
+                    state = MODULE_IDEL;
+                    module_state(&state);
                     esp8266_module_device_init(at_socket_event, at_event_lock, &net_config);
+                }
             }
         }
     } while (1);
@@ -146,7 +158,7 @@ _exit:
 **/
 _module_state_t module_state(_module_state_t *state)
 {
-    static _module_state_t module_state = MODULE_IDEL;
+    static _module_state_t module_state = MODULE_REINIT;
     static rt_mutex_t mutex = RT_NULL;
     if (!mutex)
     {
@@ -157,6 +169,7 @@ _module_state_t module_state(_module_state_t *state)
     {
         rt_mutex_take(mutex, RT_WAITING_FOREVER);
         module_state = *state;
+        g_sys.status.ComSta.net_status = *state;
         rt_mutex_release(mutex);
     }
     return module_state;
