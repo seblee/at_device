@@ -90,6 +90,7 @@ void modul_control_thread_entry(void *parameter)
     /* initialize AT client */
     at_client_init(AT_DEVICE_NAME, AT_DEVICE_RECV_BUFF_LEN);
     rt_thread_delay(rt_tick_from_millisecond(2000));
+    // rt_sem_release(module_setup_sem);
     do
     {
         result = rt_sem_take(module_setup_sem, 1000);

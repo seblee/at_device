@@ -873,7 +873,7 @@ static void sim7600_init_thread_entry(void *parameter)
     else
         thread_active = 1;
     module_state(&state);
- 
+
     resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
     if (!resp)
     {
@@ -1087,8 +1087,8 @@ int sim7600_ping(int argc, char **argv)
 // FINSH_FUNCTION_EXPORT(mq_publish, publish mqtt msg);
 #ifdef FINSH_USING_MSH
 #include <finsh.h>
-MSH_CMD_EXPORT_ALIAS(sim7600_net_init, at_net_init, initialize AT network);
-MSH_CMD_EXPORT_ALIAS(sim7600_ping, at_ping, AT ping network host);
+MSH_CMD_EXPORT_ALIAS(sim7600_net_init, at_4g_init, initialize AT network);
+MSH_CMD_EXPORT_ALIAS(sim7600_ping, at_4g_ping, AT ping network host);
 #endif
 #endif
 
