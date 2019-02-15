@@ -113,6 +113,7 @@ void modul_control_thread_entry(void *parameter)
                     LOG_I("Moudule set MODULE_REINIT......");
                     state = MODULE_REINIT;
                     module_state(&state);
+                    mqtt_send_cmd("REFRESH");
                 }
                 else if (module_state(RT_NULL) == MODULE_IDEL)
                 {

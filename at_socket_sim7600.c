@@ -764,9 +764,9 @@ static void urc_cntp_func(const char *data, rt_size_t size)
     // LOG_I("urc_cntp:%d", size);
     sscanf(data, "+CNTP: %d", &err);
     if (err == 0)
-    {
         LOG_I("CNTP START");
-    }
+    else
+        LOG_E("CNTP error:%d", err);
 }
 static void urc_cclk_func(const char *data, rt_size_t size)
 {
