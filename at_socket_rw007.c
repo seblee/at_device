@@ -1,5 +1,5 @@
 /*
- * File      : at_socket_esp8266.c
+ * File      : at_socket_rw007.c
  * This file is part of RT-Thread RTOS
  * COPYRIGHT (C) 2006 - 2018, RT-Thread Development Team
  *
@@ -28,53 +28,46 @@
 
 #include <rtthread.h>
 #include <sys/socket.h>
-#include "modul_ctr.h"
+
 #include <at_socket.h>
 
 #if !defined(AT_SW_VERSION_NUM) || AT_SW_VERSION_NUM < 0x10200
 #error "This AT Client version is older, please check and update latest AT Client!"
 #endif
 
-#define LOG_TAG "at.esp8266"
+#define LOG_TAG              "at.rw007"
 #include <at_log.h>
 
-#ifdef AT_DEVICE_ESP8266
+#ifdef AT_DEVICE_RW007
 
-#define ESP8266_MODULE_SEND_MAX_SIZE 2048
-#define ESP8266_WAIT_CONNECT_TIME 5000
-#define ESP8266_THREAD_STACK_SIZE 1024
-#define ESP8266_THREAD_PRIORITY (RT_THREAD_PRIORITY_MAX / 2)
+#define RW007_MODULE_SEND_MAX_SIZE   2048
+#define RW007_WAIT_CONNECT_TIME      5000
+#define RW007_THREAD_STACK_SIZE      1024
+#define RW007_THREAD_PRIORITY        (RT_THREAD_PRIORITY_MAX/2)
 
 /* set real event by current socket and current state */
-#define SET_EVENT(socket, event) (((socket + 1) << 16) | (event))
+#define SET_EVENT(socket, event)       (((socket + 1) << 16) | (event))
 
 /* AT socket event type */
-#define ESP8266_EVENT_CONN_OK (1L << 0)
-#define ESP8266_EVENT_SEND_OK (1L << 1)
-#define ESP8266_EVENT_RECV_OK (1L << 2)
-#define ESP8266_EVNET_CLOSE_OK (1L << 3)
-#define ESP8266_EVENT_CONN_FAIL (1L << 4)
-#define ESP8266_EVENT_SEND_FAIL (1L << 5)
+#define RW007_EVENT_CONN_OK          (1L << 0)
+#define RW007_EVENT_SEND_OK          (1L << 1)
+#define RW007_EVENT_RECV_OK          (1L << 2)
+#define RW007_EVNET_CLOSE_OK         (1L << 3)
+#define RW007_EVENT_CONN_FAIL        (1L << 4)
+#define RW007_EVENT_SEND_FAIL        (1L << 5)
 
-#define ESP8266_EVENT_SOCEKT_ON (1L << 8)
-#define ESP8266_EVENT_STATUS_GET (1L << 9)
-
-static int cur_status;
 static int cur_socket;
 static int cur_send_bfsz;
 static rt_event_t at_socket_event;
 static rt_mutex_t at_event_lock;
 static at_evt_cb_t at_evt_cb_set[] = {
-    [AT_SOCKET_EVT_RECV] = NULL,
-    [AT_SOCKET_EVT_CLOSED] = NULL,
+        [AT_SOCKET_EVT_RECV] = NULL,
+        [AT_SOCKET_EVT_CLOSED] = NULL,
 };
-
-static char Wifissid[32];
-static char WifiKey[64];
 
 static int at_socket_event_send(uint32_t event)
 {
-    return (int)rt_event_send(at_socket_event, event);
+    return (int) rt_event_send(at_socket_event, event);
 }
 
 static int at_socket_event_recv(uint32_t event, uint32_t timeout, rt_uint8_t option)
@@ -91,69 +84,6 @@ static int at_socket_event_recv(uint32_t event, uint32_t timeout, rt_uint8_t opt
     return recved;
 }
 
-static int esp8266_isSocket_connected(int socket)
-{
-    at_response_t resp = RT_NULL;
-    int result = RT_EOK, event_result = 0;
-    resp = at_create_resp(64, 0, rt_tick_from_millisecond(5000));
-    if (!resp)
-    {
-        LOG_E("No memory for response structure!");
-        return -RT_ENOMEM;
-    }
-    rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
-    cur_socket = socket;
-    /*check socket connect state*/
-    if (at_exec_cmd(resp, "AT+CIPSTATUS") < 0)
-    {
-        result = -RT_ERROR;
-        goto __exit;
-    }
-    /* waiting result event from AT URC */
-    if (at_socket_event_recv(SET_EVENT(socket, 0), rt_tick_from_millisecond(300 * 3), RT_EVENT_FLAG_OR) < 0)
-    {
-        LOG_E("socket (%d) send failed, wait connect result timeout.", socket);
-        result = -RT_ETIMEOUT;
-        goto __exit;
-    }
-    /* waiting OK or failed result */
-    if ((event_result = at_socket_event_recv(ESP8266_EVENT_STATUS_GET, rt_tick_from_millisecond(1 * 1000),
-                                             RT_EVENT_FLAG_OR)) < 0)
-    {
-        LOG_E("get status timeout", socket);
-        result = -RT_ETIMEOUT;
-        goto __exit;
-    }
-    if (cur_status != 3)
-    {
-        result = 0;
-        goto __exit;
-    }
-
-    /* waiting OK or failed result */
-    if ((event_result = at_socket_event_recv(ESP8266_EVENT_SOCEKT_ON, rt_tick_from_millisecond(1 * 1000),
-                                             RT_EVENT_FLAG_OR)) < 0)
-    {
-        result = 0;
-        goto __exit;
-    } /* check result */
-    if (event_result & ESP8266_EVENT_SOCEKT_ON)
-    {
-        result = 1;
-        goto __exit;
-    }
-
-__exit:
-    rt_mutex_release(at_event_lock);
-
-    if (resp)
-    {
-        at_delete_resp(resp);
-    }
-
-    return result;
-}
-
 /**
  * close socket by AT commands.
  *
@@ -164,10 +94,10 @@ __exit:
  *         -2: wait socket event timeout
  *         -5: no memory
  */
-static int esp8266_socket_close(int socket)
+static int rw007_socket_close(int socket)
 {
     at_response_t resp = RT_NULL;
-    int result = RT_EOK, event_result = 0;
+    int result = RT_EOK;
 
     resp = at_create_resp(64, 0, rt_tick_from_millisecond(5000));
     if (!resp)
@@ -177,51 +107,21 @@ static int esp8266_socket_close(int socket)
     }
 
     rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
-    LOG_I("check socket....");
-    /*check socket connect state*/
-    result = esp8266_isSocket_connected(socket);
-    if (result <= 0)
-        goto __exit;
-    else
+
+    if (at_exec_cmd(resp, "AT+CIPCLOSE=%d", socket) < 0)
     {
-        LOG_I("close socket....");
-        if (at_exec_cmd(resp, "AT+CIPCLOSE=%d", socket) < 0)
-        {
-            result = -RT_ERROR;
-            goto __exit;
-        } /* waiting result event from AT URC */
-        if (at_socket_event_recv(SET_EVENT(socket, 0), rt_tick_from_millisecond(300 * 3), RT_EVENT_FLAG_OR) < 0)
-        {
-            LOG_E("socket (%d) send failed, wait connect result timeout.", socket);
-            result = -RT_ETIMEOUT;
-            goto __exit;
-        }
-        /* waiting OK or failed result */
-        if ((event_result = at_socket_event_recv(ESP8266_EVNET_CLOSE_OK, rt_tick_from_millisecond(1 * 1000),
-                                                 RT_EVENT_FLAG_OR)) < 0)
-        {
-            LOG_E("socket (%d) send failed, wait connect OK|FAIL timeout.", socket);
-            result = -RT_ETIMEOUT;
-            goto __exit;
-        }
-        /* check result */
-        if (event_result & ESP8266_EVNET_CLOSE_OK)
-            result = RT_EOK;
+        result = -RT_ERROR;
+        goto __exit;
     }
 
-__exit:
-    /* notice the socket is disconnect by remote */
-    if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
-    {
-        at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
-    }
+ __exit:
     rt_mutex_release(at_event_lock);
 
     if (resp)
     {
         at_delete_resp(resp);
     }
-    result = 0;
+
     return result;
 }
 
@@ -239,10 +139,10 @@ __exit:
  *          -2: wait socket event timeout
  *          -5: no memory
  */
-static int esp8266_socket_connect(int socket, char *ip, int32_t port, enum at_socket_type type, rt_bool_t is_client)
+static int rw007_socket_connect(int socket, char *ip, int32_t port, enum at_socket_type type, rt_bool_t is_client)
 {
     at_response_t resp = RT_NULL;
-    int result = RT_EOK, event_result;
+    int result = RT_EOK;
     rt_bool_t retryed = RT_FALSE;
 
     RT_ASSERT(ip);
@@ -256,19 +156,6 @@ static int esp8266_socket_connect(int socket, char *ip, int32_t port, enum at_so
     }
 
     rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
-    cur_socket = socket;
-    /*check socket connect state*/
-
-    result = esp8266_isSocket_connected(socket);
-
-    if (result < 0)
-        goto __exit;
-    else if (result == 1)
-    {
-        result = esp8266_socket_close(socket);
-        if (result < 0)
-            goto __exit;
-    }
 
 __retry:
     if (is_client)
@@ -296,42 +183,18 @@ __retry:
             goto __exit;
         }
     }
-    if (result < 0)
-    {
-    }
 
-    /* waiting result event from AT URC */
-    if (at_socket_event_recv(SET_EVENT(socket, 0), rt_tick_from_millisecond(1000 * 3), RT_EVENT_FLAG_OR) < 0)
+    if (result != RT_EOK && !retryed)
     {
-        LOG_E("socket (%d) send failed, wait connect result timeout.", socket);
-        result = -RT_ETIMEOUT;
-        goto __exit;
-    }
-    /* waiting OK or failed result */
-    if ((event_result = at_socket_event_recv(ESP8266_EVENT_CONN_OK, rt_tick_from_millisecond(1 * 1000),
-                                             RT_EVENT_FLAG_OR)) < 0)
-    {
-        LOG_E("socket (%d) send failed, wait connect OK|FAIL timeout.", socket);
-        result = -RT_ETIMEOUT;
-        goto __exit;
-    }
-
-    if (event_result & ESP8266_EVENT_CONN_OK)
-        goto __exit;
-    /* check result */
-
-    if (!retryed)
-    {
-        LOG_E("socket (%d) connect failed, maybe the socket was not be closed at the last time and now will retry.", socket);
-        if (esp8266_socket_close(socket) < 0)
+        LOG_D("socket (%d) connect failed, maybe the socket was not be closed at the last time and now will retry.", socket);
+        if (rw007_socket_close(socket) < 0)
         {
             goto __exit;
         }
         retryed = RT_TRUE;
+        result = RT_EOK;
         goto __retry;
     }
-    LOG_E("socket (%d) connect failed, failed to establish a connection.", socket);
-    result = -RT_ERROR;
 
 __exit:
     rt_mutex_release(at_event_lock);
@@ -357,7 +220,7 @@ __exit:
  *          -2: waited socket event timeout
  *          -5: no memory
  */
-static int esp8266_socket_send(int socket, const char *buff, size_t bfsz, enum at_socket_type type)
+static int rw007_socket_send(int socket, const char *buff, size_t bfsz, enum at_socket_type type)
 {
     int result = RT_EOK;
     int event_result = 0;
@@ -383,13 +246,13 @@ static int esp8266_socket_send(int socket, const char *buff, size_t bfsz, enum a
 
     while (sent_size < bfsz)
     {
-        if (bfsz - sent_size < ESP8266_MODULE_SEND_MAX_SIZE)
+        if (bfsz - sent_size < RW007_MODULE_SEND_MAX_SIZE)
         {
             cur_pkt_size = bfsz - sent_size;
         }
         else
         {
-            cur_pkt_size = ESP8266_MODULE_SEND_MAX_SIZE;
+            cur_pkt_size = RW007_MODULE_SEND_MAX_SIZE;
         }
 
         /* send the "AT+CIPSEND" commands to AT server than receive the '>' response on the first line. */
@@ -400,7 +263,7 @@ static int esp8266_socket_send(int socket, const char *buff, size_t bfsz, enum a
         }
 
         /* send the real data to server or client */
-        result = (int)at_client_send(buff + sent_size, cur_pkt_size);
+        result = (int) at_client_send(buff + sent_size, cur_pkt_size);
         if (result == 0)
         {
             result = -RT_ERROR;
@@ -408,22 +271,22 @@ static int esp8266_socket_send(int socket, const char *buff, size_t bfsz, enum a
         }
 
         /* waiting result event from AT URC */
-        if (at_socket_event_recv(SET_EVENT(socket, 0), rt_tick_from_millisecond(6 * 1000), RT_EVENT_FLAG_OR) < 0)
+        if (at_socket_event_recv(SET_EVENT(socket, 0), rt_tick_from_millisecond(5 * 1000), RT_EVENT_FLAG_OR) < 0)
         {
             LOG_E("socket (%d) send failed, wait connect result timeout.", socket);
             result = -RT_ETIMEOUT;
             goto __exit;
         }
         /* waiting OK or failed result */
-        if ((event_result = at_socket_event_recv(ESP8266_EVENT_SEND_OK | ESP8266_EVENT_SEND_FAIL, rt_tick_from_millisecond(5 * 1000),
-                                                 RT_EVENT_FLAG_OR)) < 0)
+        if ((event_result = at_socket_event_recv(RW007_EVENT_SEND_OK | RW007_EVENT_SEND_FAIL, rt_tick_from_millisecond(5 * 1000),
+                RT_EVENT_FLAG_OR)) < 0)
         {
             LOG_E("socket (%d) send failed, wait connect OK|FAIL timeout.", socket);
             result = -RT_ETIMEOUT;
             goto __exit;
         }
         /* check result */
-        if (event_result & ESP8266_EVENT_SEND_FAIL)
+        if (event_result & RW007_EVENT_SEND_FAIL)
         {
             LOG_E("socket (%d) send failed, return failed.", socket);
             result = -RT_ERROR;
@@ -462,12 +325,12 @@ __exit:
  *         -2: wait socket event timeout
  *         -5: no memory
  */
-static int esp8266_domain_resolve(const char *name, char ip[16])
+static int rw007_domain_resolve(const char *name, char ip[16])
 {
-#define RESOLVE_RETRY 5
+#define RESOLVE_RETRY        5
 
     int i, result = RT_EOK;
-    char recv_ip[16] = {0};
+    char recv_ip[16] = { 0 };
     at_response_t resp = RT_NULL;
 
     RT_ASSERT(name);
@@ -482,7 +345,7 @@ static int esp8266_domain_resolve(const char *name, char ip[16])
 
     rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
 
-    for (i = 0; i < RESOLVE_RETRY; i++)
+    for(i = 0; i < RESOLVE_RETRY; i++)
     {
         if (at_exec_cmd(resp, "AT+CIPDOMAIN=\"%s\"", name) < 0)
         {
@@ -491,7 +354,7 @@ static int esp8266_domain_resolve(const char *name, char ip[16])
         }
 
         /* parse the third line of response data, get the IP address */
-        if (at_resp_parse_line_args_by_kw(resp, "+CIPDOMAIN:", "+CIPDOMAIN:%s", recv_ip) < 0)
+        if(at_resp_parse_line_args_by_kw(resp, "+CIPDOMAIN:", "+CIPDOMAIN:%s", recv_ip) < 0)
         {
             rt_thread_delay(rt_tick_from_millisecond(100));
             /* resolve failed, maybe receive an URC CRLF */
@@ -521,6 +384,7 @@ __exit:
     }
 
     return result;
+
 }
 
 /**
@@ -529,7 +393,7 @@ __exit:
  * @param event notice event
  * @param cb notice callback
  */
-static void esp8266_socket_set_event_cb(at_socket_evt_t event, at_evt_cb_t cb)
+static void rw007_socket_set_event_cb(at_socket_evt_t event, at_evt_cb_t cb)
 {
     if (event < sizeof(at_evt_cb_set) / sizeof(at_evt_cb_set[1]))
     {
@@ -543,11 +407,11 @@ static void urc_send_func(const char *data, rt_size_t size)
 
     if (strstr(data, "SEND OK"))
     {
-        at_socket_event_send(SET_EVENT(cur_socket, ESP8266_EVENT_SEND_OK));
+        at_socket_event_send(SET_EVENT(cur_socket, RW007_EVENT_SEND_OK));
     }
     else if (strstr(data, "SEND FAIL"))
     {
-        at_socket_event_send(SET_EVENT(cur_socket, ESP8266_EVENT_SEND_FAIL));
+        at_socket_event_send(SET_EVENT(cur_socket, RW007_EVENT_SEND_FAIL));
     }
 }
 
@@ -569,25 +433,11 @@ static void urc_close_func(const char *data, rt_size_t size)
     RT_ASSERT(data && size);
 
     sscanf(data, "%d,CLOSED", &socket);
-
-    at_socket_event_send(SET_EVENT(socket, ESP8266_EVNET_CLOSE_OK));
-
     /* notice the socket is disconnect by remote */
     if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
     {
         at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
     }
-}
-
-static void urc_connect_func(const char *data, rt_size_t size)
-{
-    int socket = 0;
-
-    RT_ASSERT(data && size);
-
-    sscanf(data, "%d,CONNECT", &socket);
-
-    at_socket_event_send(SET_EVENT(socket, ESP8266_EVENT_CONN_OK));
 }
 
 static void urc_recv_func(const char *data, rt_size_t size)
@@ -600,7 +450,7 @@ static void urc_recv_func(const char *data, rt_size_t size)
     RT_ASSERT(data && size);
 
     /* get the current socket and receive buffer size by receive data */
-    sscanf(data, "+IPD,%d,%d:", &socket, (int *)&bfsz);
+    sscanf(data, "+IPD,%d,%d:", &socket, (int *) &bfsz);
     /* get receive timeout by receive buffer length */
     timeout = bfsz;
 
@@ -660,90 +510,44 @@ static void urc_func(const char *data, rt_size_t size)
 {
     RT_ASSERT(data && size);
 
-    if (strstr(data, "WIFI CONNECTED"))
+    if(strstr(data, "WIFI CONNECTED"))
     {
-        LOG_I("ESP8266 WIFI is connected.");
+        LOG_I("RW007 WIFI is connected.");
     }
-    else if (strstr(data, "WIFI DISCONNECT"))
+    else if(strstr(data, "WIFI DISCONNECT"))
     {
-        LOG_I("ESP8266 WIFI is disconnect.");
+        LOG_I("RW007 WIFI is disconnect.");
     }
-    if (at_evt_cb_set[AT_SOCKET_EVT_CLOSED])
-    {
-        at_evt_cb_set[AT_SOCKET_EVT_CLOSED](0, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
-        at_evt_cb_set[AT_SOCKET_EVT_CLOSED](1, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
-        at_evt_cb_set[AT_SOCKET_EVT_CLOSED](2, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
-        at_evt_cb_set[AT_SOCKET_EVT_CLOSED](3, AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
-    }
-}
-static void urc_status_func(const char *data, rt_size_t size)
-{
-    int state = 0;
-    RT_ASSERT(data && size);
-    // LOG_I("STATUS:%d", size);
-    sscanf(data, "STATUS:%d", &state);
-    cur_status = state;
-    at_socket_event_send(SET_EVENT(cur_socket, ESP8266_EVENT_STATUS_GET));
-}
-static void urc_cipstatus_fun(const char *data, rt_size_t size)
-{
-    int socket = 0;
-    RT_ASSERT(data && size);
-    LOG_I("CIPSTATUS:%d", size);
-    sscanf(data, "+CIPSTATUS:%d,%*s", &socket);
-    if (socket == cur_socket)
-        at_socket_event_send(ESP8266_EVENT_SOCEKT_ON);
-}
-static void urc_already_fun(const char *data, rt_size_t size)
-{
-    RT_ASSERT(data && size);
-    // LOG_I("already:%d", size);
-    if (strstr(data, "ALREADY CONNECTED"))
-        at_socket_event_send(SET_EVENT(cur_socket, ESP8266_EVENT_SOCEKT_ON));
 }
 
 static struct at_urc urc_table[] = {
-    {"SEND OK", "\r\n", urc_send_func},
-    {"SEND FAIL", "\r\n", urc_send_func},
-    {"Recv", "bytes\r\n", urc_send_bfsz_func},
-    {"", ",CLOSED\r\n", urc_close_func},
-    {"", ",CONNECT\r\n", urc_connect_func},
-    {"+IPD", ":", urc_recv_func},
-    {"busy p", "\r\n", urc_busy_p_func},
-    {"busy s", "\r\n", urc_busy_s_func},
-    {"WIFI CONNECTED", "\r\n", urc_func},
-    {"WIFI DISCONNECT", "\r\n", urc_func},
-    {"STATUS", "\r\n", urc_status_func},
-    {"+CIPSTATUS:", "\r\n", urc_cipstatus_fun},
-    {"ALREADY CONNECTED", "\r\n", urc_already_fun},
+        {"SEND OK",          "\r\n",           urc_send_func},
+        {"SEND FAIL",        "\r\n",           urc_send_func},
+        {"Recv",             "bytes\r\n",      urc_send_bfsz_func},
+        {"",                 ",CLOSED\r\n",    urc_close_func},
+        {"+IPD",             ":",              urc_recv_func},
+        {"busy p",           "\r\n",           urc_busy_p_func},
+        {"busy s",           "\r\n",           urc_busy_s_func},
+        {"WIFI CONNECTED",   "\r\n",           urc_func},
+        {"WIFI DISCONNECT",  "\r\n",           urc_func},
 };
 
-#define AT_SEND_CMD(resp, cmd)                                                                    \
-    do                                                                                            \
-    {                                                                                             \
-        if (at_exec_cmd(at_resp_set_info(resp, 256, 0, rt_tick_from_millisecond(5000)), cmd) < 0) \
-        {                                                                                         \
-            LOG_E("RT AT send commands(%s) error!", cmd);                                         \
-            result = -RT_ERROR;                                                                   \
-            goto __exit;                                                                          \
-        }                                                                                         \
-    } while (0);
+#define AT_SEND_CMD(resp, cmd)                                                                          \
+    do                                                                                                  \
+    {                                                                                                   \
+        if (at_exec_cmd(at_resp_set_info(resp, 256, 0, rt_tick_from_millisecond(5000)), cmd) < 0)       \
+        {                                                                                               \
+            LOG_E("RT AT send commands(%s) error!", cmd);                                               \
+            result = -RT_ERROR;                                                                         \
+            goto __exit;                                                                                \
+        }                                                                                               \
+    } while(0);                                                                                         \
 
-static void esp8266_init_thread_entry(void *parameter)
+static void rw007_init_thread_entry(void *parameter)
 {
     at_response_t resp = RT_NULL;
     rt_err_t result = RT_EOK;
     rt_size_t i;
-    static int retry = 0;
-    _module_state_t state = MODULE_INIT;
-    static rt_uint8_t thread_active = 0;
-
-    if (thread_active)
-        return;
-    else
-        thread_active = 1;
-
-    module_state(&state);
 
     resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
     if (!resp)
@@ -752,25 +556,16 @@ static void esp8266_init_thread_entry(void *parameter)
         result = -RT_ENOMEM;
         goto __exit;
     }
-    LOG_I("start init");
-    i = 0;
-    resp->timeout = rt_tick_from_millisecond(500);
-    do
-    {
-        rt_thread_delay(rt_tick_from_millisecond(500));
-    } while ((at_exec_cmd(resp, "AT") < 0) && (i++ < 300));
 
-    resp->timeout = rt_tick_from_millisecond(5000);
     rt_thread_delay(rt_tick_from_millisecond(5000));
     /* reset module */
-    //   AT_SEND_CMD(resp, "AT+RESTORE");
     AT_SEND_CMD(resp, "AT+RST");
     /* reset waiting delay */
     rt_thread_delay(rt_tick_from_millisecond(1000));
     /* disable echo */
     AT_SEND_CMD(resp, "ATE0");
     /* set current mode to Wi-Fi station */
-    AT_SEND_CMD(resp, "AT+CWMODE_CUR=1");
+    AT_SEND_CMD(resp, "AT+CWMODE=1");
     /* get module version */
     AT_SEND_CMD(resp, "AT+GMR");
     /* show module version */
@@ -779,10 +574,10 @@ static void esp8266_init_thread_entry(void *parameter)
         LOG_D("%s", at_resp_get_line(resp, i + 1));
     }
     /* connect to WiFi AP */
-    if (at_exec_cmd(at_resp_set_info(resp, 128, 0, 30 * RT_TICK_PER_SECOND), "AT+CWJAP_CUR=\"%s\",\"%s\"",
-                    Wifissid, WifiKey) != RT_EOK)
+    if (at_exec_cmd(at_resp_set_info(resp, 128, 0, 20 * RT_TICK_PER_SECOND), "AT+CWJAP=\"%s\",\"%s\"",
+            AT_DEVICE_WIFI_SSID, AT_DEVICE_WIFI_PASSWORD) != RT_EOK)
     {
-        LOG_E("AT network initialize failed, check ssid(%s) and password(%s).", Wifissid, WifiKey);
+        LOG_E("AT network initialize failed, check ssid(%s) and password(%s).", AT_DEVICE_WIFI_SSID, AT_DEVICE_WIFI_PASSWORD);
         result = -RT_ERROR;
         goto __exit;
     }
@@ -798,29 +593,19 @@ __exit:
     if (!result)
     {
         LOG_I("AT network initialize success!");
-        state = MODULE_WIFI_READY;
-        module_state(&state);
-        retry = 0;
     }
     else
     {
         LOG_E("AT network initialize failed (%d)!", result);
-        rt_thread_delay(rt_tick_from_millisecond(3000));
-        if (retry++ < RESOLVE_RETRY)
-            state = MODULE_REINIT;
-        else
-            state = MODULE_IDEL;
-        module_state(&state);
     }
-    thread_active = 0;
 }
 
-int esp8266_net_init(void)
+int rw007_net_init(void)
 {
 #ifdef PKG_AT_INIT_BY_THREAD
     rt_thread_t tid;
 
-    tid = rt_thread_create("esp8266_net_init", esp8266_init_thread_entry, RT_NULL, ESP8266_THREAD_STACK_SIZE, ESP8266_THREAD_PRIORITY, 20);
+    tid = rt_thread_create("rw007_net_init", rw007_init_thread_entry, RT_NULL,RW007_THREAD_STACK_SIZE, RW007_THREAD_PRIORITY, 20);
     if (tid)
     {
         rt_thread_startup(tid);
@@ -830,13 +615,13 @@ int esp8266_net_init(void)
         LOG_E("Create AT initialization thread fail!");
     }
 #else
-    esp8266_init_thread_entry(RT_NULL);
+    rw007_init_thread_entry(RT_NULL);
 #endif
 
     return RT_EOK;
 }
 
-int esp8266_ping(int argc, char **argv)
+int rw007_ping(int argc, char **argv)
 {
     at_response_t resp = RT_NULL;
     static int icmp_seq;
@@ -855,7 +640,7 @@ int esp8266_ping(int argc, char **argv)
         return -RT_ENOMEM;
     }
 
-    for (icmp_seq = 1; icmp_seq <= 4; icmp_seq++)
+    for(icmp_seq = 1; icmp_seq <= 4; icmp_seq++)
     {
         if (at_exec_cmd(resp, "AT+PING=\"%s\"", argv[1]) < 0)
         {
@@ -864,7 +649,7 @@ int esp8266_ping(int argc, char **argv)
             return -RT_ERROR;
         }
 
-        if (at_resp_parse_line_args_by_kw(resp, "+", "+%d", &req_time) < 0)
+        if(at_resp_parse_line_args_by_kw(resp, "+", "+%d", &req_time) < 0)
         {
             continue;
         }
@@ -885,19 +670,19 @@ int esp8266_ping(int argc, char **argv)
 
 #ifdef FINSH_USING_MSH
 #include <finsh.h>
-MSH_CMD_EXPORT_ALIAS(esp8266_net_init, at_wifi_init, initialize AT network);
-MSH_CMD_EXPORT_ALIAS(esp8266_ping, at_wifi_ping, AT ping network host);
+MSH_CMD_EXPORT_ALIAS(rw007_net_init, at_net_init, initialize AT network);
+MSH_CMD_EXPORT_ALIAS(rw007_ping, at_ping, AT ping network host);
 #endif
 
-static const struct at_device_ops esp8266_socket_ops = {
-    esp8266_socket_connect,
-    esp8266_socket_close,
-    esp8266_socket_send,
-    esp8266_domain_resolve,
-    esp8266_socket_set_event_cb,
+static const struct at_device_ops rw007_socket_ops = {
+    rw007_socket_connect,
+    rw007_socket_close,
+    rw007_socket_send,
+    rw007_domain_resolve,
+    rw007_socket_set_event_cb,
 };
 
-int esp8266_at_socket_device_init(void)
+static int at_socket_device_init(void)
 {
     /* create current AT socket event */
     at_socket_event = rt_event_create("at_se", RT_IPC_FLAG_FIFO);
@@ -918,42 +703,18 @@ int esp8266_at_socket_device_init(void)
 
     /* initialize AT client */
     at_client_init(AT_DEVICE_NAME, AT_DEVICE_RECV_BUFF_LEN);
-    LOG_D("at_set_urc_table");
-    /* register URC data execution function  */
-    at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
-    LOG_D("esp8266_net_init");
-    /* initialize esp8266 network */
-    esp8266_net_init();
 
-    /* set esp8266 AT Socket options */
-    at_socket_device_register(&esp8266_socket_ops);
-
-    return RT_EOK;
-}
-// INIT_APP_EXPORT(esp8266_at_socket_device_init);
-
-int esp8266_module_device_init(rt_event_t event, rt_mutex_t lock, Net_Conf_st *netcon)
-{
-    at_socket_event = event;
-    at_event_lock = lock;
-    LOG_D("at_set_urc_table");
     /* register URC data execution function  */
     at_set_urc_table(urc_table, sizeof(urc_table) / sizeof(urc_table[0]));
 
-    rt_snprintf(Wifissid, sizeof(Wifissid), "%s", netcon->u16Wifi_Name);
-    rt_snprintf(WifiKey, sizeof(WifiKey), "%s", netcon->u16Wifi_Password);
-    // rt_strncpy(Wifissid, netcon->u16Wifi_Name, strlen(netcon->u16Wifi_Name));
-    // rt_strncpy(WifiKey, netcon->u16Wifi_Password, strlen(netcon->u16Wifi_Password));
-    LOG_I("Wifissid:%s", Wifissid);
-    LOG_I("WifiKey:%s", WifiKey);
+    /* initialize rw007 network */
+    rw007_net_init();
 
-    LOG_D("esp8266_net_init");
-    /* initialize esp8266 network */
-    esp8266_net_init();
-
-    /* set esp8266 AT Socket options */
-    at_socket_device_register(&esp8266_socket_ops);
+    /* set rw007 AT Socket options */
+    at_socket_device_register(&rw007_socket_ops);
 
     return RT_EOK;
 }
-#endif /* AT_DEVICE_ESP8266 */
+INIT_APP_EXPORT(at_socket_device_init);
+
+#endif /* AT_DEVICE_RW007 */

@@ -22,14 +22,14 @@
  * 2018-06-20     chenyong     first version
  */
 
-#include <at.h>
 #include <stdio.h>
 #include <string.h>
 
 #include <rtthread.h>
 #include <sys/socket.h>
-#include "modul_ctr.h"
+#include <at.h>
 #include <at_socket.h>
+#include "modul_ctr.h"
 
 #if !defined(AT_SW_VERSION_NUM) || AT_SW_VERSION_NUM < 0x10200
 #error "This AT Client version is older, please check and update latest AT Client!"
@@ -586,6 +586,19 @@ static void sim7600_socket_set_event_cb(at_socket_evt_t event, at_evt_cb_t cb)
     }
 }
 
+static void urc_cipopen_func(const char *data, rt_size_t size)
+{
+    int socket, err;
+
+    RT_ASSERT(data && size);
+    // LOG_I("urc_cipopen:%d", size);
+    sscanf(data, "+CIPOPEN: %d,%d", &socket, &err);
+    if (err == 0)
+        at_socket_event_send(SET_EVENT(socket, SIM7600_EVENT_CONN_OK));
+    else
+        at_socket_event_send(SET_EVENT(socket, SIM7600_EVENT_CONN_FAIL));
+}
+
 static void urc_send_func(const char *data, rt_size_t size)
 {
     int socket, reqSendLength = 0, cnfSendLength = 0;
@@ -601,18 +614,6 @@ static void urc_send_func(const char *data, rt_size_t size)
     {
         at_socket_event_send(SET_EVENT(cur_socket, SIM7600_EVENT_SEND_FAIL));
     }
-}
-static void urc_cipopen_func(const char *data, rt_size_t size)
-{
-    int socket, err;
-
-    RT_ASSERT(data && size);
-    // LOG_I("urc_cipopen:%d", size);
-    sscanf(data, "+CIPOPEN: %d,%d", &socket, &err);
-    if (err == 0)
-        at_socket_event_send(SET_EVENT(socket, SIM7600_EVENT_CONN_OK));
-    else
-        at_socket_event_send(SET_EVENT(socket, SIM7600_EVENT_CONN_FAIL));
 }
 
 static void urc_cipclose_func(const char *data, rt_size_t size)
@@ -848,22 +849,27 @@ static struct at_urc urc_table[] = {
     {"PB DONE", "\r\n", urc_pbdone_func},
 };
 
-#define AT_SEND_CMD(resp, cmd)                                                                    \
-    do                                                                                            \
-    {                                                                                             \
-        if (at_exec_cmd(at_resp_set_info(resp, 256, 0, rt_tick_from_millisecond(5000)), cmd) < 0) \
-        {                                                                                         \
-            LOG_E("RT AT send commands(%s) error!", cmd);                                         \
-            result = -RT_ERROR;                                                                   \
-            goto __exit;                                                                          \
-        }                                                                                         \
+#define AT_SEND_CMD(resp, resp_line, timeout, cmd)                                                           \
+    do                                                                                                       \
+    {                                                                                                        \
+        if (at_exec_cmd(at_resp_set_info(resp, 128, resp_line, rt_tick_from_millisecond(timeout)), cmd) < 0) \
+        {                                                                                                    \
+            LOG_E("RT AT send commands(%s) error!", cmd);                                                    \
+            result = -RT_ERROR;                                                                              \
+            goto __exit;                                                                                     \
+        }                                                                                                    \
     } while (0);
 
 static void sim7600_init_thread_entry(void *parameter)
 {
+#define CPIN_RETRY 10
+#define CSQ_RETRY 10
+#define CREG_RETRY 10
+#define CGREG_RETRY 20
     at_response_t resp = RT_NULL;
     rt_err_t result = RT_EOK;
     rt_size_t i;
+    char parsed_data[10];
     static int retry = 0;
     _module_state_t state = MODULE_INIT;
     static rt_uint8_t thread_active = 0;
@@ -884,6 +890,8 @@ static void sim7600_init_thread_entry(void *parameter)
 
     LOG_I("start init");
     i = 0;
+    ;
+
     do
     {
         if (i > RESOLVE_RETRY)
@@ -891,14 +899,12 @@ static void sim7600_init_thread_entry(void *parameter)
             result = -RT_ENOMEM;
             goto __exit;
         }
-        rt_thread_delay(rt_tick_from_millisecond(2000));
-    } while ((at_exec_cmd(resp, "AT") < 0) && (i++ < 200));
+    } while ((at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK) && (i++ < 200));
     /* reset module */
-    // AT_SEND_CMD(resp, "AT+CFUN=1,1");
-    // AT_SEND_CMD(resp, "AT+CRESET");
-    AT_SEND_CMD(resp, "AT+CFUN=0");
+
+    AT_SEND_CMD(resp, 0, 300, "AT+CFUN=0");
     rt_thread_delay(rt_tick_from_millisecond(2000));
-    AT_SEND_CMD(resp, "AT+CFUN=1");
+    AT_SEND_CMD(resp, 0, 300, "AT+CFUN=1");
     /* reset waiting delay */
     rt_thread_delay(rt_tick_from_millisecond(5000));
 
@@ -911,32 +917,31 @@ static void sim7600_init_thread_entry(void *parameter)
             goto __exit;
         }
         rt_thread_delay(rt_tick_from_millisecond(2000));
-    } while ((at_exec_cmd(resp, "AT") < 0) && (i++ < 200));
+    } while ((at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK) && (i++ < 200));
     rt_thread_delay(rt_tick_from_millisecond(1000));
     /* disable echo */
-    AT_SEND_CMD(resp, "ATE0");
+    AT_SEND_CMD(resp, 0, 300, "ATE0");
     /* Request model identification */
-    AT_SEND_CMD(resp, "AT+CGMM");
+    AT_SEND_CMD(resp, 0, 300, "AT+CGMM");
     /* Request revision identification */
-    AT_SEND_CMD(resp, "AT+CGMR");
-    i = 10;
-    do
+    AT_SEND_CMD(resp, 0, 300, "AT+CGMR");
+    for (i = 0; i < CPIN_RETRY; i++)
     {
-        //+CPIN: READY
-        if (at_exec_cmd(at_resp_set_info(resp, 256, 4, rt_tick_from_millisecond(5000)), "AT+CPIN?") == RT_EOK)
+        at_exec_cmd(at_resp_set_info(resp, 128, 2, rt_tick_from_millisecond(5000)), "AT+CPIN?");
+
+        if (at_resp_get_line_by_kw(resp, "READY"))
         {
-            /* parse the third line of response data, get the IP address */
-            if (!strstr(at_resp_get_line(resp, 2), "+CPIN: READY"))
-            {
-                LOG_E("checkout sim card failed");
-                result = -RT_ENOMEM;
-                goto __exit;
-            }
-            else
-                break;
+            LOG_D("SIM card detection success");
+            break;
         }
         rt_thread_delay(rt_tick_from_millisecond(1000));
-    } while (i--);
+    }
+    if (i == CPIN_RETRY)
+    {
+        LOG_E("SIM card detection failed!");
+        result = -RT_ERROR;
+        goto __exit;
+    }
 
     i = 0;
     do
@@ -954,24 +959,42 @@ static void sim7600_init_thread_entry(void *parameter)
             }
         }
     } while (i++ < 100);
+    /* check signal strength */
+    for (i = 0; i < CSQ_RETRY; i++)
+    {
+        AT_SEND_CMD(resp, 0, 300, "AT+CSQ");
+        at_resp_parse_line_args_by_kw(resp, "+CSQ:", "+CSQ: %s", &parsed_data);
+        if (strncmp(parsed_data, "99,99", sizeof(parsed_data)))
+        {
+            LOG_D("Signal strength: %s", parsed_data);
+            break;
+        }
+        rt_thread_delay(rt_tick_from_millisecond(1000));
+    }
+    if (i == CSQ_RETRY)
+    {
+        LOG_E("Signal strength check failed (%s)", parsed_data);
+        result = -RT_ERROR;
+        goto __exit;
+    }
     /* set ntc server */
-    AT_SEND_CMD(resp, "AT+CNTP=\"ntp.aliyun.com\",32");
+    AT_SEND_CMD(resp, 0, 300, "AT+CNTP=\"ntp.aliyun.com\",32");
     /* operation ntc */
-    AT_SEND_CMD(resp, "AT+CNTP");
+    AT_SEND_CMD(resp, 0, 300, "AT+CNTP");
     rt_thread_delay(rt_tick_from_millisecond(2000));
     /* Select sending mode */
-    AT_SEND_CMD(resp, "AT+CIPSENDMODE=0");
+    AT_SEND_CMD(resp, 0, 300, "AT+CIPSENDMODE=0");
     /* Add an IP head when receiving data */
-    AT_SEND_CMD(resp, "AT+CIPHEAD=1");
+    AT_SEND_CMD(resp, 0, 300, "AT+CIPHEAD=1");
     /* Show Remote IP address and Port */
-    AT_SEND_CMD(resp, "AT+CIPSRIP=0");
+    AT_SEND_CMD(resp, 0, 300, "AT+CIPSRIP=0");
     /* Select TCP/IP application mode */
-    AT_SEND_CMD(resp, "AT+CIPMODE=0");
+    AT_SEND_CMD(resp, 0, 300, "AT+CIPMODE=0");
     /* Select TCP/IP application mode */
-    AT_SEND_CMD(resp, "AT+CIPCCFG=10,0,0,1,1,0,500");
+    AT_SEND_CMD(resp, 0, 300, "AT+CIPCCFG=10,0,0,1,1,0,500");
     // AT_SEND_CMD(resp, "AT+CIPCCFG?");
     rt_thread_delay(rt_tick_from_millisecond(1000));
-    AT_SEND_CMD(resp, "AT+NETOPEN");
+    AT_SEND_CMD(resp, 0, 300, "AT+NETOPEN");
     /* Open socket */
     int event_result;
     if ((event_result = at_socket_event_recv(SIM7600_EVENT_NETOPEN_OK | SIM7600_EVENT_NETOPEN_FAIL, rt_tick_from_millisecond(5 * 1000),
@@ -995,11 +1018,11 @@ static void sim7600_init_thread_entry(void *parameter)
 
     rt_thread_delay(rt_tick_from_millisecond(2000));
     /* Inquire socket PDP address */
-    AT_SEND_CMD(resp, "AT+IPADDR");
+    AT_SEND_CMD(resp, 0, 300, "AT+IPADDR");
     /* show module version */
     rt_thread_delay(rt_tick_from_millisecond(2000));
     /* Inquire socket PDP address */
-    AT_SEND_CMD(resp, "AT+CCLK?");
+    AT_SEND_CMD(resp, 0, 300, "AT+CCLK?");
     /* show module version */
 
 __exit:
