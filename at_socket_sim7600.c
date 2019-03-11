@@ -667,9 +667,9 @@ static void urc_recv_func(const char *data, rt_size_t size)
     char *recv_buf = RT_NULL, temp[8];
 
     RT_ASSERT(data && size);
-    // LOG_I("urc_recv:%d", size);
     /* get the current socket and receive buffer size by receive data */
     sscanf(data, "+RECEIVE,%d,%d", &socket, (int *)&bfsz);
+    // LOG_I("urc_recv:%d,socket:%d,bfsz:%d", size, socket, bfsz);
     /* get receive timeout by receive buffer length */
     timeout = bfsz;
 
@@ -902,9 +902,9 @@ static void sim7600_init_thread_entry(void *parameter)
     } while ((at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK) && (i++ < 200));
     /* reset module */
 
-    AT_SEND_CMD(resp, 0, 300, "AT+CFUN=0");
+    AT_SEND_CMD(resp, 0, 5000, "AT+CFUN=0");
     rt_thread_delay(rt_tick_from_millisecond(2000));
-    AT_SEND_CMD(resp, 0, 300, "AT+CFUN=1");
+    AT_SEND_CMD(resp, 0, 5000, "AT+CFUN=1");
     /* reset waiting delay */
     rt_thread_delay(rt_tick_from_millisecond(5000));
 
