@@ -754,11 +754,15 @@ static void esp8266_init_thread_entry(void *parameter)
     }
     LOG_I("start init");
     i = 0;
-    resp->timeout = rt_tick_from_millisecond(500);
+
     do
     {
-        rt_thread_delay(rt_tick_from_millisecond(500));
-    } while ((at_exec_cmd(resp, "AT") < 0) && (i++ < 300));
+        if (i > RESOLVE_RETRY)
+        {
+            result = -RT_ENOMEM;
+            goto __exit;
+        }
+    } while ((at_client_wait_connect(5000) != RT_EOK) && (i++ < 200));
 
     resp->timeout = rt_tick_from_millisecond(5000);
     rt_thread_delay(rt_tick_from_millisecond(5000));

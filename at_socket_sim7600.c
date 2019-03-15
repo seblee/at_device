@@ -890,7 +890,6 @@ static void sim7600_init_thread_entry(void *parameter)
 
     LOG_I("start init");
     i = 0;
-    ;
 
     do
     {
