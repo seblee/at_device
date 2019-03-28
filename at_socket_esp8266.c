@@ -69,8 +69,8 @@ static at_evt_cb_t at_evt_cb_set[] = {
     [AT_SOCKET_EVT_CLOSED] = NULL,
 };
 
-static char Wifissid[32];
-static char WifiKey[64];
+static char Wifissid[32]={"Cloudwater"};
+static char WifiKey[64]={"tqcd2018"};
 
 static int at_socket_event_send(uint32_t event)
 {
@@ -934,7 +934,7 @@ int esp8266_at_socket_device_init(void)
 
     return RT_EOK;
 }
-// INIT_APP_EXPORT(esp8266_at_socket_device_init);
+INIT_APP_EXPORT(esp8266_at_socket_device_init);
 
 int esp8266_module_device_init(rt_event_t event, rt_mutex_t lock, Net_Conf_st *netcon)
 {
