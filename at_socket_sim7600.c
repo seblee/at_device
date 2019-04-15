@@ -859,7 +859,15 @@ static struct at_urc urc_table[] = {
             goto __exit;                                                                                     \
         }                                                                                                    \
     } while (0);
-
+/**
+ * power up sim76xx modem
+ */
+static void sim76xx_power_on(void)
+{
+    rt_pin_write(AT_DEVICE_POWER_PIN, PIN_HIGH);
+    rt_thread_delay(rt_tick_from_millisecond(3000));
+    rt_pin_write(AT_DEVICE_POWER_PIN, PIN_LOW);
+}
 static void sim7600_init_thread_entry(void *parameter)
 {
 #define CPIN_RETRY 10
@@ -893,12 +901,12 @@ static void sim7600_init_thread_entry(void *parameter)
 
     do
     {
-        if (i > RESOLVE_RETRY)
+        if (i++ > RESOLVE_RETRY)
         {
             result = -RT_ENOMEM;
             goto __exit;
         }
-    } while ((at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK) && (i++ < 200));
+    } while (at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK);
     /* reset module */
 
     AT_SEND_CMD(resp, 0, 5000, "AT+CFUN=0");
@@ -910,13 +918,12 @@ static void sim7600_init_thread_entry(void *parameter)
     i = 0;
     do
     {
-        if (i > RESOLVE_RETRY)
+        if (i++ > RESOLVE_RETRY)
         {
             result = -RT_ENOMEM;
             goto __exit;
         }
-        rt_thread_delay(rt_tick_from_millisecond(2000));
-    } while ((at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK) && (i++ < 200));
+    } while (at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK);
     rt_thread_delay(rt_tick_from_millisecond(1000));
     /* disable echo */
     AT_SEND_CMD(resp, 0, 300, "ATE0");
@@ -1043,7 +1050,10 @@ __exit:
         result = 0;
         rt_thread_delay(rt_tick_from_millisecond(3000));
         if (retry++ < RESOLVE_RETRY)
+        {
             state = MODULE_REINIT;
+            sim76xx_power_on();
+        }
         else
             state = MODULE_IDEL;
         module_state(&state);
