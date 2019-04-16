@@ -734,7 +734,6 @@ static void esp8266_init_thread_entry(void *parameter)
     at_response_t resp = RT_NULL;
     rt_err_t result = RT_EOK;
     rt_size_t i;
-    static int retry = 0;
     _module_state_t state = MODULE_INIT;
     static rt_uint8_t thread_active = 0;
 
@@ -804,17 +803,11 @@ __exit:
         LOG_I("AT network initialize success!");
         state = MODULE_WIFI_READY;
         module_state(&state);
-        retry = 0;
     }
     else
     {
         LOG_E("AT network initialize failed (%d)!", result);
-        rt_thread_delay(rt_tick_from_millisecond(3000));
-        if (retry++ < RESOLVE_RETRY)
-            state = MODULE_REINIT;
-        else
-            state = MODULE_IDEL;
-        module_state(&state);
+        rt_sem_release(module_setup_sem);
     }
     thread_active = 0;
 }
@@ -1010,7 +1003,7 @@ int esp8266_at_socket_device_init(void)
 
     return RT_EOK;
 }
-INIT_APP_EXPORT(esp8266_at_socket_device_init);
+// INIT_APP_EXPORT(esp8266_at_socket_device_init);
 
 int esp8266_module_device_init(rt_event_t event, rt_mutex_t lock, Net_Conf_st *netcon)
 {

@@ -94,6 +94,21 @@ static int at_socket_event_recv(uint32_t event, uint32_t timeout, rt_uint8_t opt
     return recved;
 }
 
+static void err_option(int err)
+{
+    static  int err_all = 0;
+    if (err == 0)
+        err_all = 0;
+    else if (err_all != -0xffff)
+        err_all += err;
+
+    if ((err_all < -5) && (err_all != -0xffff))
+    {
+        err_all = -0xffff;
+        rt_sem_release(module_setup_sem);
+    }
+}
+
 static int sim7600_isSocket_connected(int socket)
 {
     at_response_t resp = RT_NULL;
@@ -139,6 +154,7 @@ static int sim7600_isSocket_connected(int socket)
     }
 
 __exit:
+
     rt_mutex_release(at_event_lock);
 
     if (resp)
@@ -214,7 +230,7 @@ static int sim7600_socket_close(int socket)
 
 __exit:
     /* notice the socket is disconnect by remote */
-
+    err_option(result);
     rt_mutex_release(at_event_lock);
 
     if (resp)
@@ -327,6 +343,7 @@ __retry:
     }
 
 __exit:
+    err_option(result);
     rt_mutex_release(at_event_lock);
 
     if (resp)
@@ -434,7 +451,7 @@ static int sim7600_socket_send(int socket, const char *buff, size_t bfsz, enum a
 __exit:
     /* reset the end sign for data */
     at_set_end_sign(0);
-
+    err_option(result);
     rt_mutex_release(at_event_lock);
 
     if (resp)
@@ -525,6 +542,7 @@ static int sim7600_domain_resolve(const char *name, char ip[16])
     }
 
 __exit:
+    err_option(result);
     rt_mutex_release(at_event_lock);
 
     if (resp)
@@ -878,7 +896,6 @@ static void sim7600_init_thread_entry(void *parameter)
     rt_err_t result = RT_EOK;
     rt_size_t i;
     char parsed_data[10];
-    static int retry = 0;
     _module_state_t state = MODULE_INIT;
     static rt_uint8_t thread_active = 0;
 
@@ -909,11 +926,11 @@ static void sim7600_init_thread_entry(void *parameter)
     } while (at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK);
     /* reset module */
 
-    AT_SEND_CMD(resp, 0, 5000, "AT+CFUN=0");
-    rt_thread_delay(rt_tick_from_millisecond(2000));
-    AT_SEND_CMD(resp, 0, 5000, "AT+CFUN=1");
-    /* reset waiting delay */
-    rt_thread_delay(rt_tick_from_millisecond(5000));
+    // AT_SEND_CMD(resp, 0, 5000, "AT+CFUN=0");
+    // rt_thread_delay(rt_tick_from_millisecond(2000));
+    // AT_SEND_CMD(resp, 0, 5000, "AT+CFUN=1");
+    // /* reset waiting delay */
+    // rt_thread_delay(rt_tick_from_millisecond(5000));
 
     i = 0;
     do
@@ -949,8 +966,7 @@ static void sim7600_init_thread_entry(void *parameter)
         goto __exit;
     }
 
-    i = 0;
-    do
+    for (i = 0; i < CREG_RETRY; i++)
     {
         int ncode, stat;
         if (at_exec_cmd(resp, "AT+CREG?") == RT_EOK)
@@ -958,13 +974,20 @@ static void sim7600_init_thread_entry(void *parameter)
             /* parse the third line of response data, get the IP address */
             if (at_resp_parse_line_args_by_kw(resp, "+CREG:", "+CREG: %d,%d", &ncode, &stat) > 0)
             {
-                rt_thread_delay(rt_tick_from_millisecond(1000));
                 LOG_E("ncode:%d, stat:%d", ncode, stat);
                 if (stat == 1)
                     break;
             }
+            rt_thread_delay(rt_tick_from_millisecond(1000));
         }
-    } while (i++ < 100);
+    }
+    if (i == CREG_RETRY)
+    {
+        LOG_E("SIM register failed!");
+        result = -RT_ERROR;
+        goto __exit;
+    }
+
     /* check signal strength */
     for (i = 0; i < CSQ_RETRY; i++)
     {
@@ -987,7 +1010,7 @@ static void sim7600_init_thread_entry(void *parameter)
     AT_SEND_CMD(resp, 0, 300, "AT+CNTP=\"ntp.aliyun.com\",32");
     /* operation ntc */
     AT_SEND_CMD(resp, 0, 300, "AT+CNTP");
-    rt_thread_delay(rt_tick_from_millisecond(2000));
+    rt_thread_delay(rt_tick_from_millisecond(200));
     /* Select sending mode */
     AT_SEND_CMD(resp, 0, 300, "AT+CIPSENDMODE=0");
     /* Add an IP head when receiving data */
@@ -999,7 +1022,7 @@ static void sim7600_init_thread_entry(void *parameter)
     /* Select TCP/IP application mode */
     AT_SEND_CMD(resp, 0, 300, "AT+CIPCCFG=10,0,0,1,1,0,500");
     // AT_SEND_CMD(resp, "AT+CIPCCFG?");
-    rt_thread_delay(rt_tick_from_millisecond(1000));
+    rt_thread_delay(rt_tick_from_millisecond(100));
     AT_SEND_CMD(resp, 0, 300, "AT+NETOPEN");
     /* Open socket */
     int event_result;
@@ -1022,11 +1045,9 @@ static void sim7600_init_thread_entry(void *parameter)
         goto __exit;
     }
 
-    rt_thread_delay(rt_tick_from_millisecond(2000));
     /* Inquire socket PDP address */
     AT_SEND_CMD(resp, 0, 300, "AT+IPADDR");
     /* show module version */
-    rt_thread_delay(rt_tick_from_millisecond(2000));
     /* Inquire socket PDP address */
     AT_SEND_CMD(resp, 0, 300, "AT+CCLK?");
     /* show module version */
@@ -1042,21 +1063,12 @@ __exit:
         LOG_I("AT network initialize success!");
         state = MODULE_4G_READY;
         module_state(&state);
-        retry = 0;
     }
     else
     {
         LOG_E("AT network initialize failed (%d)!", result);
-        result = 0;
-        rt_thread_delay(rt_tick_from_millisecond(3000));
-        if (retry++ < RESOLVE_RETRY)
-        {
-            state = MODULE_REINIT;
-            sim76xx_power_on();
-        }
-        else
-            state = MODULE_IDEL;
-        module_state(&state);
+        sim76xx_power_on();
+        rt_sem_release(module_setup_sem);
     }
     thread_active = 0;
 }
