@@ -128,8 +128,11 @@ void modul_control_thread_entry(void *parameter)
             {
                 u16Net_Sel_bak = net_config.u16Net_Sel;
                 DIR_7600();
-                state = MODULE_IDEL;
-                module_state(&state);
+                if (module_state(RT_NULL) >= MODULE_4G_READY)
+                {
+                    state = MODULE_IDEL;
+                    module_state(&state);
+                }
                 sim7600_module_device_init(at_socket_event, at_event_lock);
             }
             else
@@ -138,8 +141,11 @@ void modul_control_thread_entry(void *parameter)
                 {
                     DIR_8266();
                     u16Net_Sel_bak = net_config.u16Net_Sel;
-                    state = MODULE_IDEL;
-                    module_state(&state);
+                    if (module_state(RT_NULL) >= MODULE_4G_READY)
+                    {
+                        state = MODULE_IDEL;
+                        module_state(&state);
+                    }
                     esp8266_module_device_init(at_socket_event, at_event_lock, &net_config);
                 }
             }
