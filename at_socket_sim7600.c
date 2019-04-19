@@ -56,12 +56,15 @@
 #define SIM7600_EVNET_CLOSE_OK (1L << 3)
 #define SIM7600_EVENT_CONN_FAIL (1L << 4)
 #define SIM7600_EVENT_SEND_FAIL (1L << 5)
+#define SIM7600_EVENT_SOCKET_ON (1L << 6)
+#define SIM7600_EVENT_SOCKET_OFF (1L << 7)
 
 #define SIM7600_EVNET_CLOSE_FAIL (1L << 10)
 
 #define RESOLVE_RETRY 5
 
 static int cur_socket;
+static int check_socket;
 static int cur_send_bfsz;
 static rt_event_t at_socket_event;
 static rt_mutex_t at_event_lock;
@@ -168,7 +171,6 @@ static int sim7600_socket_close(int socket)
 {
     at_response_t resp = RT_NULL;
     int result = RT_EOK, event_result = 0;
-    uint8_t lnk_stat[10];
 
     resp = at_create_resp(128, 0, rt_tick_from_millisecond(500));
     if (!resp)
@@ -178,10 +180,9 @@ static int sim7600_socket_close(int socket)
     }
 
     rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
-
+    check_socket = socket;
     rt_thread_delay(rt_tick_from_millisecond(100));
 
-    /*check socket connect state*/
     // check socket link_state
     if (at_exec_cmd(resp, "AT+CIPCLOSE?") < 0)
     {
@@ -189,13 +190,22 @@ static int sim7600_socket_close(int socket)
         goto __exit;
     }
 
-    if (at_resp_parse_line_args_by_kw(resp, "+CIPCLOSE:", "+CIPCLOSE: %d,%d,%d,%d,%d,%d,%d,%d,%d,%d", &lnk_stat[0], &lnk_stat[1], &lnk_stat[1], &lnk_stat[2], &lnk_stat[3], &lnk_stat[4], &lnk_stat[5], &lnk_stat[6], &lnk_stat[7], &lnk_stat[8], &lnk_stat[9]) < 0)
+    /* waiting result event from AT URC */
+    if (at_socket_event_recv(SET_EVENT(socket, 0), rt_tick_from_millisecond(300 * 3), RT_EVENT_FLAG_OR) < 0)
     {
-        result = -RT_ERROR;
+        LOG_E("socket (%d) send failed, wait connect result timeout.", socket);
+        result = -RT_ETIMEOUT;
         goto __exit;
     }
-
-    if (lnk_stat[socket])
+    /* waiting OK or failed result */
+    if ((event_result = at_socket_event_recv(SIM7600_EVENT_SOCKET_ON | SIM7600_EVENT_SOCKET_OFF, rt_tick_from_millisecond(100),
+                                             RT_EVENT_FLAG_OR)) < 0)
+    {
+        LOG_E("socket (%d) send failed, wait connect OK|FAIL timeout.", socket);
+        result = -RT_ETIMEOUT;
+        goto __exit;
+    } /* check result */
+    if (event_result & SIM7600_EVENT_SOCKET_ON)
     {
         if (at_exec_cmd(resp, "AT+CIPCLOSE=%d", socket) < 0)
         {
@@ -221,6 +231,11 @@ static int sim7600_socket_close(int socket)
             result = RT_EOK;
         else if (event_result & SIM7600_EVNET_CLOSE_FAIL)
             result = -RT_ERROR;
+    }
+    else if (event_result & SIM7600_EVENT_SOCKET_OFF)
+    {
+        LOG_D("socket (%d) IS NOT CONNECTED.", socket);
+        result = RT_EOK;
     }
 
 __exit:
@@ -863,6 +878,12 @@ static void urc_cipclose_func(const char *data, rt_size_t size)
         {
             at_evt_cb_set[AT_SOCKET_EVT_CLOSED](socket[0], AT_SOCKET_EVT_CLOSED, RT_NULL, 0);
         }
+    }
+    else
+    {
+        sscanf(data, "+CIPCLOSE: %d,%d,%d,%d,%d,%d,%d,%d,%d,%d", &socket[0], &socket[1], &socket[2], &socket[3], &socket[4], &socket[5], &socket[6], &socket[7], &socket[8], &socket[9]);
+        LOG_W("CHECK SOCKET: socket:%d,link_state:%d", check_socket, socket[check_socket]);
+        at_socket_event_send(SET_EVENT(check_socket, (socket[check_socket] == 0) ? SIM7600_EVENT_SOCKET_OFF : SIM7600_EVENT_SOCKET_ON));
     }
 }
 static void urc_cgmr_func(const char *data, rt_size_t size)
