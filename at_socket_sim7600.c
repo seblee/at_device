@@ -1044,6 +1044,16 @@ static void sim7600_init_thread_entry(void *parameter)
         goto __exit;
     }
     LOG_I("start init");
+    for (i = 0; i < 2; i++)
+    {
+        if (at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) == RT_EOK)
+            break;
+        if (i++ > RESOLVE_RETRY)
+        {
+            result = -RT_ENOMEM;
+            goto __exit;
+        }
+    }
     if (at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK)
         sim76xx_reset();
     else
