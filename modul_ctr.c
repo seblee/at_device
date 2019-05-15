@@ -150,11 +150,74 @@ void modul_control_thread_entry(void *parameter)
                 }
             }
         }
+        if (g_sys.config.ComPara.u16Test_Mode_Type == TEST_ALL_OUT)
+            module_test_mode();
     } while (1);
 _exit:
     result = result;
 }
 
+void module_test_mode(void)
+{
+    int result = RT_EOK;
+    char buff[100];
+    char buff1[10] = {0x01, 0x03, 0x03, 0x84, 0x00, 0x01, 0xC4, 0x67};
+    char buff2[10] = {0x01, 0x03, 0x02, 0x41, 0x54, 0x89, 0xeb};
+    char buff3[10] = {0x01, 0x03, 0x02, 0x54, 0x41, 0x46, 0xb4};
+    struct serial_configure config = RT_SERIAL_CONFIG_DEFAULT;
+    at_client_t at_client = RT_NULL;
+    int pin_OK = 0;
+
+    mqtt_send_cmd("DISCONNECT");
+
+    at_client = at_client_get((const char *)AT_DEVICE_NAME);
+    rt_thread_delete(at_client->parser);
+
+    // rt_thread_delay(rt_tick_from_millisecond(5000));
+    config.baud_rate = BAUD_RATE_19200;
+    config.bufsz = 2048;
+
+    rt_pin_mode(AT_DEVICE_RESET_PIN, PIN_MODE_INPUT);
+    DIR_8266();
+    rt_thread_delay(rt_tick_from_millisecond(1000));
+    if (rt_pin_read(AT_DEVICE_RESET_PIN) == 1)
+    {
+        //   DIR_7600();
+        rt_thread_delay(rt_tick_from_millisecond(1000));
+        if (rt_pin_read(AT_DEVICE_RESET_PIN) == 0)
+            pin_OK = 1;
+    }
+
+#ifdef RT_USING_DEVICE_OPS
+    at_client->device->ops->control(at_client->device, RT_DEVICE_CTRL_CONFIG, &config);
+#else
+    at_client->device->control(at_client->device, RT_DEVICE_CTRL_CONFIG, &config);
+#endif
+
+    while (1)
+    {
+        /* code */
+        rt_memset(buff, 0, sizeof(buff));
+        rt_thread_delay(rt_tick_from_millisecond(100));
+        result = at_client->device->ops->read(at_client->device, 0, buff, 100);
+        if (result > 0)
+        {
+            rt_kprintf("Get \"AT\"   \r\n");
+            if (rt_memcmp(buff, buff1, 8) == 0)
+            {
+                if (pin_OK)
+                    result = (int)at_client_send(buff2, 7);
+                else
+                    result = (int)at_client_send(buff3, 7);
+                if (result == strlen("AT"))
+                {
+                }
+            }
+        }
+        else
+            rt_kprintf("timeout \r\n");
+    }
+}
 /**
  ****************************************************************************
  * @Function : _module_state_t module_state(_module_state_t *state)

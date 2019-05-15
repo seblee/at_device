@@ -42,4 +42,5 @@ int sim7600_cclk_cmd(void);
 _module_state_t module_state(_module_state_t *state);
 
 int module_thread_start(void *parameter);
+void module_test_mode(void);
 /*----------------------------------------------------------------------------*/
