@@ -177,16 +177,16 @@ void module_test_mode(void)
     config.baud_rate = BAUD_RATE_19200;
     config.bufsz = 2048;
 
-    rt_pin_mode(AT_DEVICE_RESET_PIN, PIN_MODE_INPUT);
+    //rt_pin_mode(AT_DEVICE_RESET_PIN, PIN_MODE_INPUT);
     DIR_8266();
     rt_thread_delay(rt_tick_from_millisecond(1000));
-    if (rt_pin_read(AT_DEVICE_RESET_PIN) == 1)
-    {
-        //   DIR_7600();
-        rt_thread_delay(rt_tick_from_millisecond(1000));
-        if (rt_pin_read(AT_DEVICE_RESET_PIN) == 0)
-            pin_OK = 1;
-    }
+    // if (rt_pin_read(AT_DEVICE_RESET_PIN) == 1)
+    // {
+    //     //   DIR_7600();
+    //     rt_thread_delay(rt_tick_from_millisecond(1000));
+    //     if (rt_pin_read(AT_DEVICE_RESET_PIN) == 0)
+    //         pin_OK = 1;
+    // }
 
 #ifdef RT_USING_DEVICE_OPS
     at_client->device->ops->control(at_client->device, RT_DEVICE_CTRL_CONFIG, &config);
@@ -199,7 +199,12 @@ void module_test_mode(void)
         /* code */
         rt_memset(buff, 0, sizeof(buff));
         rt_thread_delay(rt_tick_from_millisecond(100));
+
+#ifdef RT_USING_DEVICE_OPS
         result = at_client->device->ops->read(at_client->device, 0, buff, 100);
+#else
+        result = at_client->device->read(at_client->device, 0, buff, 100);
+#endif
         if (result > 0)
         {
             rt_kprintf("Get \"AT\"   \r\n");

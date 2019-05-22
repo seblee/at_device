@@ -1002,9 +1002,9 @@ static struct at_urc urc_table[] = {
  */
 void sim76xx_power_on(void)
 {
-    rt_pin_write(AT_DEVICE_POWER_PIN, PIN_HIGH);
+    // rt_pin_write(AT_DEVICE_POWER_PIN, PIN_HIGH);
     rt_thread_delay(rt_tick_from_millisecond(200));
-    rt_pin_write(AT_DEVICE_POWER_PIN, PIN_LOW);
+    // rt_pin_write(AT_DEVICE_POWER_PIN, PIN_LOW);
     rt_thread_delay(rt_tick_from_millisecond(1000));
 }
 /**
@@ -1012,9 +1012,9 @@ void sim76xx_power_on(void)
  */
 static void sim76xx_reset(void)
 {
-    rt_pin_write(AT_DEVICE_RESET_PIN, PIN_LOW);
+    // rt_pin_write(AT_DEVICE_RESET_PIN, PIN_LOW);
     rt_thread_delay(rt_tick_from_millisecond(200));
-    rt_pin_write(AT_DEVICE_RESET_PIN, PIN_HIGH);
+    // rt_pin_write(AT_DEVICE_RESET_PIN, PIN_HIGH);
     rt_thread_delay(rt_tick_from_millisecond(1000));
 }
 static void sim7600_init_thread_entry(void *parameter)
