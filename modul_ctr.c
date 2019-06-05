@@ -124,6 +124,7 @@ void modul_control_thread_entry(void *parameter)
         else
         {
             LOG_I("Moudule initialize start......");
+            rt_thread_delay(rt_tick_from_millisecond(100));
             if (net_config.u16Net_Sel)
             {
                 u16Net_Sel_bak = net_config.u16Net_Sel;
