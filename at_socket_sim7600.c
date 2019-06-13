@@ -30,11 +30,12 @@
 #include <sys/socket.h>
 #include <at_socket.h>
 #include "modul_ctr.h"
+#include "network.h"
 
 #if !defined(AT_SW_VERSION_NUM) || AT_SW_VERSION_NUM < 0x10200
 #error "This AT Client version is older, please check and update latest AT Client!"
 #endif
-
+#define AT_DEBUG
 #define LOG_TAG "at.sim7600"
 #include <at_log.h>
 
@@ -990,7 +991,7 @@ static struct at_urc urc_table[] = {
 #define AT_SEND_CMD(resp, resp_line, timeout, cmd)                                                           \
     do                                                                                                       \
     {                                                                                                        \
-        if (at_exec_cmd(at_resp_set_info(resp, 128, resp_line, rt_tick_from_millisecond(timeout)), cmd) < 0) \
+        if (at_exec_cmd(at_resp_set_info(resp, 512, resp_line, rt_tick_from_millisecond(timeout)), cmd) < 0) \
         {                                                                                                    \
             LOG_E("RT AT send commands(%s) error!", cmd);                                                    \
             result = -RT_ERROR;                                                                              \
@@ -1010,18 +1011,20 @@ void sim76xx_power_on(void)
 /**
  * reset sim76xx modem
  */
-static void sim76xx_reset(void)
+void sim76xx_reset(void)
 {
-    // rt_pin_write(AT_DEVICE_RESET_PIN, PIN_LOW);
+    LOG_D("sim76xx_reset");
+    SIM7600_RESET();
     rt_thread_delay(rt_tick_from_millisecond(200));
-    // rt_pin_write(AT_DEVICE_RESET_PIN, PIN_HIGH);
+    SIM7600_SET();
     rt_thread_delay(rt_tick_from_millisecond(1000));
 }
+
 static void sim7600_init_thread_entry(void *parameter)
 {
 #define CPIN_RETRY 20
 #define CSQ_RETRY 10
-#define CREG_RETRY 10
+#define CREG_RETRY 15
 #define CGREG_RETRY 20
     at_response_t resp = RT_NULL;
     rt_err_t result = RT_EOK;
@@ -1029,21 +1032,26 @@ static void sim7600_init_thread_entry(void *parameter)
     char parsed_data[10];
     _module_state_t state = MODULE_INIT;
     static rt_uint8_t thread_active = 0;
-
+    static int init_count = 0;
     if (thread_active)
+    {
+        LOG_I("thread is running");
         return;
+    }
     else
         thread_active = 1;
+
+    LOG_I("start init count:%d", init_count++);
     module_state(&state);
     rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
-    resp = at_create_resp(128, 0, rt_tick_from_millisecond(5000));
+    resp = at_create_resp(512, 0, rt_tick_from_millisecond(5000));
     if (!resp)
     {
         LOG_E("No memory for response structure!");
         result = -RT_ENOMEM;
         goto __exit;
     }
-    LOG_I("start init");
+
     for (i = 0; i < 2; i++)
     {
         if (at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) == RT_EOK)
@@ -1095,6 +1103,10 @@ static void sim7600_init_thread_entry(void *parameter)
     AT_SEND_CMD(resp, 0, 300, "AT+CGMR");
     /* Request revision identification */
     AT_SEND_CMD(resp, 0, 300, "AT+SIMCOMATI");
+    for (i = 2; i < resp->line_counts - 1; i++)
+    {
+        LOG_D("%s", at_resp_get_line(resp, i));
+    }
     for (i = 0; i < CPIN_RETRY; i++)
     {
         at_exec_cmd(at_resp_set_info(resp, 128, 2, rt_tick_from_millisecond(5000)), "AT+CPIN?");
@@ -1121,11 +1133,30 @@ static void sim7600_init_thread_entry(void *parameter)
             /* parse the third line of response data, get the IP address */
             if (at_resp_parse_line_args_by_kw(resp, "+CREG:", "+CREG: %d,%d", &ncode, &stat) > 0)
             {
-                LOG_E("ncode:%d, stat:%d", ncode, stat);
-                if (stat == 1)
+                LOG_D("ncode:%d, stat:%d", ncode, stat);
+                if ((stat == 1) || (stat == 5))
+                {
+                    LOG_D("registered, %s", (stat == 1) ? "home network" : "roaming");
                     break;
+                }
+                if ((stat == 0) || (stat == 2))
+                {
+                    LOG_D("not registered, ME is%scurrently searching a new operator to register to", (stat == 0) ? " not " : " ");
+                }
+                else if ((stat == 3) || (stat == 4))
+                {
+                    LOG_E("CREG failed!:%s", (stat == 3) ? "registration denied" : "unknown");
+                    result = -RT_ERROR;
+                    goto __exit;
+                }
             }
-            rt_thread_delay(rt_tick_from_millisecond(1000));
+            rt_thread_delay(rt_tick_from_millisecond(1500));
+        }
+        else
+        {
+            LOG_E("AT+CREG? err ******************");
+            result = -RT_ERROR;
+            goto __exit;
         }
     }
     if (i == CREG_RETRY)
@@ -1179,7 +1210,7 @@ __exit:
     {
         at_delete_resp(resp);
     }
-
+    thread_active = 0;
     if (!result)
     {
         LOG_I("AT network initialize success!");
@@ -1191,7 +1222,6 @@ __exit:
         LOG_E("AT network initialize failed (%d)!", result);
         rt_sem_release(module_setup_sem);
     }
-    thread_active = 0;
 }
 
 int sim7600_net_init(void)

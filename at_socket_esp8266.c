@@ -736,11 +736,15 @@ static void esp8266_init_thread_entry(void *parameter)
     rt_size_t i;
     _module_state_t state = MODULE_INIT;
     static rt_uint8_t thread_active = 0;
-
+    static int init_count = 0;
     if (thread_active)
+    {
+        LOG_D("No memory for response structure!");
         return;
+    }
     else
         thread_active = 1;
+    LOG_I("start init count:%d", init_count++);
 
     module_state(&state);
 
@@ -798,6 +802,7 @@ __exit:
         at_delete_resp(resp);
     }
 
+    thread_active = 0;
     if (!result)
     {
         LOG_I("AT network initialize success!");
@@ -809,7 +814,6 @@ __exit:
         LOG_E("AT network initialize failed (%d)!", result);
         rt_sem_release(module_setup_sem);
     }
-    thread_active = 0;
 }
 
 int esp8266_net_init(void)
