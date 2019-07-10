@@ -728,7 +728,7 @@ static struct at_urc urc_table[] = {
             goto __exit;                                                                          \
         }                                                                                         \
     } while (0);
-
+extern sys_reg_st g_sys; 
 static void esp8266_init_thread_entry(void *parameter)
 {
     at_response_t resp = RT_NULL;
@@ -766,6 +766,7 @@ static void esp8266_init_thread_entry(void *parameter)
             goto __exit;
         }
     } while ((at_client_wait_connect(5000) != RT_EOK) && (i++ < 200));
+    g_sys.status.ComSta.REQ_TEST[0] = 101;
 
     resp->timeout = rt_tick_from_millisecond(5000);
     rt_thread_delay(rt_tick_from_millisecond(5000));
@@ -776,6 +777,7 @@ static void esp8266_init_thread_entry(void *parameter)
     rt_thread_delay(rt_tick_from_millisecond(1000));
     /* disable echo */
     AT_SEND_CMD(resp, "ATE0");
+    g_sys.status.ComSta.REQ_TEST[0] = 102;
     /* set current mode to Wi-Fi station */
     AT_SEND_CMD(resp, "AT+CWMODE_CUR=1");
     /* get module version */
@@ -785,6 +787,7 @@ static void esp8266_init_thread_entry(void *parameter)
     {
         LOG_D("%s", at_resp_get_line(resp, i + 1));
     }
+    g_sys.status.ComSta.REQ_TEST[0] = 103;
     /* connect to WiFi AP */
     if (at_exec_cmd(at_resp_set_info(resp, 128, 0, 30 * RT_TICK_PER_SECOND), "AT+CWJAP_CUR=\"%s\",\"%s\"",
                     Wifissid, WifiKey) != RT_EOK)
@@ -793,6 +796,7 @@ static void esp8266_init_thread_entry(void *parameter)
         result = -RT_ERROR;
         goto __exit;
     }
+    g_sys.status.ComSta.REQ_TEST[0] = 104;
 
     AT_SEND_CMD(resp, "AT+CIPMUX=1");
 
@@ -808,9 +812,11 @@ __exit:
         LOG_I("AT network initialize success!");
         state = MODULE_WIFI_READY;
         module_state(&state);
+        g_sys.status.ComSta.REQ_TEST[0] = 110;
     }
     else
     {
+        g_sys.status.ComSta.REQ_TEST[0] = 0 - g_sys.status.ComSta.REQ_TEST[0];
         LOG_E("AT network initialize failed (%d)!", result);
         rt_sem_release(module_setup_sem);
     }

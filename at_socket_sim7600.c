@@ -1019,7 +1019,7 @@ void sim76xx_reset(void)
     SIM7600_SET();
     rt_thread_delay(rt_tick_from_millisecond(1000));
 }
-
+extern sys_reg_st g_sys; 
 static void sim7600_init_thread_entry(void *parameter)
 {
 #define CPIN_RETRY 20
@@ -1040,7 +1040,7 @@ static void sim7600_init_thread_entry(void *parameter)
     }
     else
         thread_active = 1;
-
+    g_sys.status.ComSta.REQ_TEST[0] = 0;
     LOG_I("start init count:%d", init_count++);
     module_state(&state);
     rt_mutex_take(at_event_lock, RT_WAITING_FOREVER);
@@ -1051,7 +1051,7 @@ static void sim7600_init_thread_entry(void *parameter)
         result = -RT_ENOMEM;
         goto __exit;
     }
-
+    g_sys.status.ComSta.REQ_TEST[0] = 1;
     for (i = 0; i < 2; i++)
     {
         if (at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) == RT_EOK)
@@ -1084,7 +1084,6 @@ static void sim7600_init_thread_entry(void *parameter)
             goto __exit;
         }
     }
-
     i = 0;
     do
     {
@@ -1094,6 +1093,7 @@ static void sim7600_init_thread_entry(void *parameter)
             goto __exit;
         }
     } while (at_client_wait_connect(SIM7600_WAIT_CONNECT_TIME) != RT_EOK);
+    g_sys.status.ComSta.REQ_TEST[0] = 2;
     rt_thread_delay(rt_tick_from_millisecond(1000));
     /* disable echo */
     AT_SEND_CMD(resp, 0, 300, "ATE0");
@@ -1103,6 +1103,7 @@ static void sim7600_init_thread_entry(void *parameter)
     AT_SEND_CMD(resp, 0, 300, "AT+CGMR");
     /* Request revision identification */
     AT_SEND_CMD(resp, 0, 300, "AT+SIMCOMATI");
+    g_sys.status.ComSta.REQ_TEST[0] = 3;
     for (i = 2; i < resp->line_counts - 1; i++)
     {
         LOG_D("%s", at_resp_get_line(resp, i));
@@ -1124,7 +1125,7 @@ static void sim7600_init_thread_entry(void *parameter)
         result = -RT_ERROR;
         goto __exit;
     }
-
+    g_sys.status.ComSta.REQ_TEST[0] = 4;
     for (i = 0; i < CREG_RETRY; i++)
     {
         int ncode, stat;
@@ -1165,7 +1166,7 @@ static void sim7600_init_thread_entry(void *parameter)
         result = -RT_ERROR;
         goto __exit;
     }
-
+    g_sys.status.ComSta.REQ_TEST[0] = 5;
     /* check signal strength */
     for (i = 0; i < CSQ_RETRY; i++)
     {
@@ -1184,6 +1185,7 @@ static void sim7600_init_thread_entry(void *parameter)
         result = -RT_ERROR;
         goto __exit;
     }
+    g_sys.status.ComSta.REQ_TEST[0] = 6;
     /* set ntc server */
     AT_SEND_CMD(resp, 0, 300, "AT+CNTP=\"ntp.aliyun.com\",32");
     /* operation ntc */
@@ -1196,14 +1198,14 @@ static void sim7600_init_thread_entry(void *parameter)
         result = -RT_ERROR;
         goto __exit;
     }
-
+    g_sys.status.ComSta.REQ_TEST[0] = 7;
     /* Inquire socket PDP address */
     AT_SEND_CMD(resp, 0, 300, "AT+IPADDR");
     /* show module version */
     /* Inquire socket PDP address */
     AT_SEND_CMD(resp, 0, 300, "AT+CCLK?");
     /* show module version */
-
+    g_sys.status.ComSta.REQ_TEST[0] = 8;
 __exit:
     rt_mutex_release(at_event_lock);
     if (resp)
@@ -1216,9 +1218,11 @@ __exit:
         LOG_I("AT network initialize success!");
         state = MODULE_4G_READY;
         module_state(&state);
+        g_sys.status.ComSta.REQ_TEST[0] = 10;
     }
     else
     {
+        g_sys.status.ComSta.REQ_TEST[0] = 0 - g_sys.status.ComSta.REQ_TEST[0];
         LOG_E("AT network initialize failed (%d)!", result);
         rt_sem_release(module_setup_sem);
     }
